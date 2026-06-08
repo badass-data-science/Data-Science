@@ -4,4 +4,6 @@ This notebook forecasts AWS EC2 spot prices using ARIMA. Parameters are identifi
 
 [Final Results](ARIMA_demo.html)
 
+[Click here to view the live HTML page](https://github.io)
+
 Beyond ARIMA, this code demonstrates multiprocess computing (for the ARIMA parameter grid search) and object-oriented programming in the "prepare_data" module.
