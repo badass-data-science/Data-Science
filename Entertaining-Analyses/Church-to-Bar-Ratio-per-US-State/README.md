@@ -2,6 +2,8 @@
 
 !["CBR"](example-output/per_us_state_church_to_bar_ratio.png)
 
+## Introduction
+
 The brighter the color, the higher the church-to-bar ratio.
 
 ## Method
