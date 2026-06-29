@@ -10,39 +10,24 @@
     "semantic_hash": "6766e05acdebd1fb5b69b7dd068b1576"
   },
   "etl/CandlestickETL.py": {
-    "mtime": 1782691285.5518827,
-    "ast_hash": "d33cfe65d0dd1d14fa64368d1d018e27",
-    "semantic_hash": "d33cfe65d0dd1d14fa64368d1d018e27"
+    "mtime": 1782773806.1493547,
+    "ast_hash": "b1da86a61fec21c861c180765c6a8e54",
+    "semantic_hash": "b1da86a61fec21c861c180765c6a8e54"
   },
   "etl/config/database_config.py": {
     "mtime": 1782689382.1406407,
     "ast_hash": "3d2138d8ea352e14e55581b597023d31",
     "semantic_hash": "3d2138d8ea352e14e55581b597023d31"
   },
-  "etl/config/schema_config.py": {
-    "mtime": 1782681916.1555614,
-    "ast_hash": "a1550f693bce82d46a8f6f9d8710d4c8",
-    "semantic_hash": "a1550f693bce82d46a8f6f9d8710d4c8"
-  },
   "etl/models.py": {
-    "mtime": 1782691251.011312,
-    "ast_hash": "d647ec6e9eebc763049da674604c24e3",
-    "semantic_hash": "d647ec6e9eebc763049da674604c24e3"
-  },
-  "etl/pipelines/.ipynb_checkpoints/CandlestickPipeline-checkpoint.py": {
-    "mtime": 1782681894.188276,
-    "ast_hash": "30eb24230b4ea3619749ff9abdc943c0",
-    "semantic_hash": "30eb24230b4ea3619749ff9abdc943c0"
-  },
-  "etl/pipelines/.ipynb_checkpoints/ForwardFillInator-checkpoint.py": {
-    "mtime": 1782689341.1411421,
-    "ast_hash": "46007e9e140dc68916a3eadddbf185e3",
-    "semantic_hash": "46007e9e140dc68916a3eadddbf185e3"
+    "mtime": 1782773784.0706306,
+    "ast_hash": "557aa7284decd8b7079fc4f6204c76e0",
+    "semantic_hash": "557aa7284decd8b7079fc4f6204c76e0"
   },
   "etl/pipelines/CandlestickPipeline.py": {
-    "mtime": 1782691301.7326818,
-    "ast_hash": "00b79f37489721f8eced240e7d9b0294",
-    "semantic_hash": "00b79f37489721f8eced240e7d9b0294"
+    "mtime": 1782773819.660186,
+    "ast_hash": "30663e242c1a6bb7a5d1778220b856b0",
+    "semantic_hash": "30663e242c1a6bb7a5d1778220b856b0"
   },
   "etl/pipelines/ForwardFillInator.py": {
     "mtime": 1782691333.8022835,
@@ -50,9 +35,9 @@
     "semantic_hash": "1f6435ef22d941ed2e9fcb93c794ea0f"
   },
   "flows/candlestick_flow.py": {
-    "mtime": 1782691351.553063,
-    "ast_hash": "dabef40e0330dedf04c98578bac1b91a",
-    "semantic_hash": "dabef40e0330dedf04c98578bac1b91a"
+    "mtime": 1782773830.796047,
+    "ast_hash": "a4e0841b372a2c575bf31336ec87a76b",
+    "semantic_hash": "a4e0841b372a2c575bf31336ec87a76b"
   },
   "flows/forward_fill_flow.py": {
     "mtime": 1782691358.9089715,

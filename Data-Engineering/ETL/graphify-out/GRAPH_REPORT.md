@@ -1,73 +1,75 @@
-# Graph Report - forex  (2026-06-28)
+# Graph Report - forex  (2026-06-29)
 
 ## Corpus Check
-- Corpus is ~3,414 words - fits in a single context window. You may not need a graph.
+- 4 files · ~2,477 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 131 nodes · 221 edges · 12 communities (6 shown, 6 thin omitted)
-- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 32 edges (avg confidence: 0.75)
+- 108 nodes · 181 edges · 13 communities (7 shown, 6 thin omitted)
+- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 26 edges (avg confidence: 0.74)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Market Timezone & Core ETL|Market Timezone & Core ETL]]
-- [[_COMMUNITY_Candlestick Data Models & Tests|Candlestick Data Models & Tests]]
-- [[_COMMUNITY_Candlestick ETL Engine|Candlestick ETL Engine]]
-- [[_COMMUNITY_Forward Fill Transformer|Forward Fill Transformer]]
-- [[_COMMUNITY_Prefect Pipeline Flows|Prefect Pipeline Flows]]
-- [[_COMMUNITY_Forward Fill (Checkpoint)|Forward Fill (Checkpoint)]]
-- [[_COMMUNITY_Deployment & Infrastructure|Deployment & Infrastructure]]
-- [[_COMMUNITY_Candlestick Pipeline (A)|Candlestick Pipeline (A)]]
-- [[_COMMUNITY_Candlestick Pipeline (B)|Candlestick Pipeline (B)]]
-- [[_COMMUNITY_Database Configuration|Database Configuration]]
+- [[_COMMUNITY_Market Hours & Core ETL|Market Hours & Core ETL]]
+- [[_COMMUNITY_Forward Fill Pipeline|Forward Fill Pipeline]]
+- [[_COMMUNITY_Candlestick ETL Class|Candlestick ETL Class]]
+- [[_COMMUNITY_Pydantic Data Model & Tests|Pydantic Data Model & Tests]]
+- [[_COMMUNITY_Infrastructure & Flow Config|Infrastructure & Flow Config]]
+- [[_COMMUNITY_InfluxDB Dict Tests|InfluxDB Dict Tests]]
+- [[_COMMUNITY_Candlestick Pipeline Orchestration|Candlestick Pipeline Orchestration]]
+- [[_COMMUNITY_Prefect Candlestick Flow|Prefect Candlestick Flow]]
+- [[_COMMUNITY_Prefect Forward Fill Flow|Prefect Forward Fill Flow]]
+- [[_COMMUNITY_Timezone Unit Tests|Timezone Unit Tests]]
+- [[_COMMUNITY_Database Config|Database Config]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `CandlestickETL` - 18 edges
-2. `is_market_open_at_time()` - 15 edges
+1. `CandlestickETL` - 16 edges
+2. `is_market_open_at_time()` - 14 edges
 3. `_at()` - 13 edges
-4. `CandlestickRecord` - 12 edges
+4. `CandlestickRecord` - 13 edges
 5. `ForwardFillInator` - 12 edges
-6. `ForwardFillInator` - 12 edges
-7. `TestMarketHours` - 12 edges
-8. `TestToInfluxDict` - 11 edges
-9. `CandlestickPipeline` - 9 edges
-10. `CandlestickPipeline` - 9 edges
+6. `TestMarketHours` - 12 edges
+7. `TestToInfluxDict` - 11 edges
+8. `CandlestickPipeline` - 10 edges
+9. `candlestick_flow` - 7 edges
+10. `TestCandlestickRecord` - 6 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `check_market_open_task()` --calls--> `is_market_open()`  [INFERRED]
-  flows/candlestick_flow.py → critical_timezone.py
+- `TestToInfluxDict` --uses--> `CandlestickRecord`  [INFERRED]
+  tests/test_models.py → etl/models.py
 - `fetch_candlestick_data()` --calls--> `CandlestickETL`  [INFERRED]
   flows/candlestick_flow.py → etl/CandlestickETL.py
 - `TestCandlestickRecord` --uses--> `CandlestickRecord`  [INFERRED]
   tests/test_models.py → etl/models.py
-- `TestToInfluxDict` --uses--> `CandlestickRecord`  [INFERRED]
-  tests/test_models.py → etl/models.py
 - `CandlestickETL` --uses--> `CandlestickRecord`  [INFERRED]
   etl/CandlestickETL.py → etl/models.py
+- `CandlestickPipeline` --uses--> `CandlestickETL`  [INFERRED]
+  etl/pipelines/CandlestickPipeline.py → etl/CandlestickETL.py
 
 ## Import Cycles
 - None detected.
 
-## Hyperedges (group relationships)
-- **Prefect-Orchestrated Forex ETL Pipeline Deployment** — forex_how_to_start_forex_pipeline_candlestick_flow, forex_how_to_start_forex_pipeline_forward_fill_flow, forex_how_to_start_forex_pipeline_prefect_server, forex_how_to_start_forex_pipeline_cron_schedule [EXTRACTED 1.00]
-- **Forex ETL Credential Chain** — forex_how_to_start_forex_pipeline_oanda_config, forex_how_to_start_forex_pipeline_aws_secrets_manager, forex_how_to_start_forex_pipeline_influxdb [EXTRACTED 1.00]
+## Communities (13 total, 6 thin omitted)
 
-## Communities (12 total, 6 thin omitted)
+### Community 0 - "Market Hours & Core ETL"
+Cohesion: 0.21
+Nodes (5): is_market_open(), is_market_open_at_time(), datetime, _at(), TestMarketHours
 
-### Community 0 - "Market Timezone & Core ETL"
-Cohesion: 0.16
-Nodes (6): is_market_open(), is_market_open_at_time(), datetime, _at(), TestMarketHours, TestTimezoneObject
+### Community 3 - "Pydantic Data Model & Tests"
+Cohesion: 0.29
+Nodes (3): BaseModel, CandlestickRecord, TestCandlestickRecord
 
-### Community 1 - "Candlestick Data Models & Tests"
-Cohesion: 0.17
-Nodes (4): BaseModel, CandlestickRecord, TestCandlestickRecord, TestToInfluxDict
-
-### Community 4 - "Prefect Pipeline Flows"
-Cohesion: 0.24
-Nodes (11): candlestick_flow(), check_market_open_task(), fetch_candlestick_data(), insert_to_influxdb(), _make_ifc(), Prefect flow: fetch Oanda candlesticks → InfluxDB.  Deploy:     python -m forex., forward_fill_flow(), forward_fill_task() (+3 more)
-
-### Community 6 - "Deployment & Infrastructure"
+### Community 4 - "Infrastructure & Flow Config"
 Cohesion: 0.31
 Nodes (10): AWS Secrets Manager, candlestick_flow, check_market_open_task, CronSchedule (prefect.schedules), How to Start Forex Pipeline, forward_fill_flow, InfluxDB, Oanda Config JSON (+2 more)
+
+### Community 7 - "Prefect Candlestick Flow"
+Cohesion: 0.52
+Nodes (6): candlestick_flow(), check_market_open_task(), fetch_candlestick_data(), insert_to_influxdb(), _make_ifc(), Prefect flow: fetch Oanda candlesticks → InfluxDB.  Deploy:     python -m forex.
+
+### Community 8 - "Prefect Forward Fill Flow"
+Cohesion: 0.47
+Nodes (5): forward_fill_flow(), forward_fill_task(), _make_ifc(), Prefect flow: forward-fill stored candlestick gaps → InfluxDB.  Deploy:     pyth, InfluxDbTool
 
 ## Knowledge Gaps
 - **3 isolated node(s):** `Oanda Config JSON`, `InfluxDB`, `Prefect Server`
@@ -77,17 +79,17 @@ Nodes (10): AWS Secrets Manager, candlestick_flow, check_market_open_task, CronS
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `CandlestickETL` connect `Candlestick ETL Engine` to `Market Timezone & Core ETL`, `Candlestick Data Models & Tests`, `Prefect Pipeline Flows`, `Candlestick Pipeline (A)`, `Candlestick Pipeline (B)`?**
-  _High betweenness centrality (0.349) - this node is a cross-community bridge._
-- **Why does `is_market_open_at_time()` connect `Market Timezone & Core ETL` to `Forward Fill (Checkpoint)`?**
-  _High betweenness centrality (0.206) - this node is a cross-community bridge._
-- **Why does `CandlestickRecord` connect `Candlestick Data Models & Tests` to `Candlestick ETL Engine`?**
-  _High betweenness centrality (0.198) - this node is a cross-community bridge._
-- **Are the 6 inferred relationships involving `CandlestickETL` (e.g. with `CandlestickRecord` and `fetch_candlestick_data()`) actually correct?**
-  _`CandlestickETL` has 6 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 12 inferred relationships involving `is_market_open_at_time()` (e.g. with `.compute_df_all_time_diff_market_open()` and `.test_friday_16_is_open()`) actually correct?**
-  _`is_market_open_at_time()` has 12 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `CandlestickRecord` (e.g. with `CandlestickETL` and `.make_the_InfluxDB_dict()`) actually correct?**
-  _`CandlestickRecord` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `# TODO: replace with an explicit holiday calendar.`, `Prefect flow: fetch Oanda candlesticks → InfluxDB.  Deploy:     python -m forex.`, `Prefect flow: forward-fill stored candlestick gaps → InfluxDB.  Deploy:     pyth` to the rest of the system?**
+- **Why does `CandlestickETL` connect `Candlestick ETL Class` to `Market Hours & Core ETL`, `Pydantic Data Model & Tests`, `Candlestick Pipeline Orchestration`, `Prefect Candlestick Flow`?**
+  _High betweenness centrality (0.299) - this node is a cross-community bridge._
+- **Why does `CandlestickRecord` connect `Pydantic Data Model & Tests` to `Candlestick ETL Class`, `InfluxDB Dict Tests`, `Candlestick Pipeline Orchestration`?**
+  _High betweenness centrality (0.213) - this node is a cross-community bridge._
+- **Why does `fetch_candlestick_data()` connect `Prefect Candlestick Flow` to `Candlestick ETL Class`?**
+  _High betweenness centrality (0.138) - this node is a cross-community bridge._
+- **Are the 4 inferred relationships involving `CandlestickETL` (e.g. with `CandlestickRecord` and `fetch_candlestick_data()`) actually correct?**
+  _`CandlestickETL` has 4 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 11 inferred relationships involving `is_market_open_at_time()` (e.g. with `.test_friday_16_is_open()` and `.test_friday_17_is_closed()`) actually correct?**
+  _`is_market_open_at_time()` has 11 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 10 inferred relationships involving `CandlestickRecord` (e.g. with `CandlestickETL` and `.make_the_InfluxDB_dict()`) actually correct?**
+  _`CandlestickRecord` has 10 INFERRED edges - model-reasoned connections that need verification._
+- **What connects `# TODO: replace with an explicit holiday calendar.`, `Prefect flow: forward-fill stored candlestick gaps → InfluxDB.  Deploy:     pyth`, `Oanda Config JSON` to the rest of the system?**
   _6 weakly-connected nodes found - possible documentation gaps or missing edges._
