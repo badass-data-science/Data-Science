@@ -35,9 +35,9 @@
     "semantic_hash": "1f6435ef22d941ed2e9fcb93c794ea0f"
   },
   "flows/candlestick_flow.py": {
-    "mtime": 1782773830.796047,
-    "ast_hash": "a4e0841b372a2c575bf31336ec87a76b",
-    "semantic_hash": "a4e0841b372a2c575bf31336ec87a76b"
+    "mtime": 1782775521.9214725,
+    "ast_hash": "19d03140bfdad9bad0d3c0456b5901ec",
+    "semantic_hash": "19d03140bfdad9bad0d3c0456b5901ec"
   },
   "flows/forward_fill_flow.py": {
     "mtime": 1782691358.9089715,
@@ -65,8 +65,18 @@
     "semantic_hash": "5a4189c4cd4c46d395663fd207ecb3a5"
   },
   "how_to_start_forex_pipeline.md": {
-    "mtime": 1782701330.1371863,
-    "ast_hash": "d9d8f65aa80e901159cad87e91935d9c",
-    "semantic_hash": "d9d8f65aa80e901159cad87e91935d9c"
+    "mtime": 1782775693.5532691,
+    "ast_hash": "60df120c8cdb125b3aa74e6fa6ba274e",
+    "semantic_hash": "60df120c8cdb125b3aa74e6fa6ba274e"
+  },
+  "flows/serve.py": {
+    "mtime": 1782775536.4682858,
+    "ast_hash": "c4c53412b2a468178b7a0fd94a40b85e",
+    "semantic_hash": "c4c53412b2a468178b7a0fd94a40b85e"
+  },
+  "README.md": {
+    "mtime": 1782775624.386157,
+    "ast_hash": "b3a9d34fc7fa99c10e7c1681c998d953",
+    "semantic_hash": "b3a9d34fc7fa99c10e7c1681c998d953"
   }
 }
