@@ -171,8 +171,11 @@ def fit_sarima(
     train, test = train_test_split(df, holdout_size)
     y_test = test["value"].values
 
+    # Pass a single-column DataFrame, not a Series: statsmodels only hits its
+    # deprecated in-place ndarray.shape= reshape (NumPy 2.5+ DeprecationWarning)
+    # for 1-D endog. Behavior and results are otherwise identical either way.
     model = SARIMAX(
-        train["value"],
+        train[["value"]],
         order=order,
         seasonal_order=seasonal_order,
         enforce_stationarity=False,

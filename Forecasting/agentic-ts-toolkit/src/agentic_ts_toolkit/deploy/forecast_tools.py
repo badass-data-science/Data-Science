@@ -137,8 +137,11 @@ def forecast_sarima(
     order = tuple(order) if order else (1, 1, 1)
     seasonal_order = tuple(seasonal_order) if seasonal_order else (1, 1, 1, 7)
 
+    # Single-column DataFrame, not a Series -- avoids statsmodels' deprecated
+    # in-place ndarray.shape= reshape (NumPy 2.5+ DeprecationWarning), which
+    # only triggers for 1-D endog. See forecaster/model_tools.py::fit_sarima.
     model = SARIMAX(
-        df["value"], order=order, seasonal_order=seasonal_order, enforce_stationarity=False, enforce_invertibility=False
+        df[["value"]], order=order, seasonal_order=seasonal_order, enforce_stationarity=False, enforce_invertibility=False
     )
     fit = model.fit(disp=False)
 
