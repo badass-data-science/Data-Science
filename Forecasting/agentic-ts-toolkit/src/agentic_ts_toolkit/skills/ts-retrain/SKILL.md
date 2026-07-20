@@ -130,3 +130,12 @@ skill)?
 In both modes, `execute_redeploy` is the only tool that should ever
 actually change the deployment -- never call `ts-deploy`'s tools directly
 from within this skill as a substitute.
+
+## See also
+
+- `AGENTS.md` at the project root for conventions and caveats shared
+  across all layers -- in particular: why `compare_candidate_to_deployed`
+  requires a relative improvement above a threshold rather than any
+  improvement, why `execute_redeploy` needs the `deploy` extra installed
+  regardless of `model_type`, and the full human-confirmed vs.
+  autonomous-mode contract with example authorization phrasing.

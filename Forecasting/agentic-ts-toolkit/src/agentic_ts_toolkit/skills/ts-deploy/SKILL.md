@@ -86,3 +86,10 @@ forecast itself, not a wall of methodology:
   circumstances would make this forecast unreliable (e.g. "if the recent
   anomaly at [date] was a one-off promotion rather than a new pattern,
   actual demand may be lower than shown here").
+
+## See also
+
+- `AGENTS.md` at the project root for conventions and caveats shared
+  across all layers -- in particular, the gradient-boosted-trees
+  recursive (here) vs. one-step-ahead (`ts-forecaster`) evaluation
+  asymmetry is documented there as intentional, not a bug to reconcile.

@@ -63,3 +63,9 @@ Once you have enough evidence, stop calling tools and write a report with:
   investigated before modeling, since they may distort seasonal estimates").
 
 If a tool result is ambiguous, say so rather than overstating confidence.
+
+## See also
+
+- `AGENTS.md` at the project root for conventions shared across all
+  layers (e.g. the shared `data_prep.py`, the plain-function/`server.py`
+  split, and how the other layers' `SKILL.md` files reference tools).

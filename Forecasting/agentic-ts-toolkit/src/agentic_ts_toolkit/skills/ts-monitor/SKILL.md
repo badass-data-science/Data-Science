@@ -78,7 +78,17 @@ caveat in your report, but still report what it actually returned.
   `drift_detected=True` looks like trend/seasonality vs. something new.
 - **Recommendation**: exactly what `recommend_retraining` returned, plus
   its `reasoning` field.
-- **What to do next**: if the recommendation was `retrain_now`, say
-  clearly that this means re-running `ts-analyst` and `ts-forecaster` on
-  the updated series before redeploying via `ts-deploy` -- don't just
-  report the verdict and stop.
+- **What to do next**: if the recommendation was `retrain_now` (or
+  `investigate`), say clearly that this means invoking the `ts-retrain`
+  skill next -- it re-runs `ts-analyst` and `ts-forecaster` on the updated
+  series and decides deterministically whether the resulting candidate is
+  actually worth redeploying, then redeploys only through its own gated,
+  confirmed workflow. Don't just report the verdict and stop, and don't
+  tell the user to run `ts-analyst`/`ts-forecaster`/`ts-deploy` by hand as
+  if `ts-retrain` didn't exist.
+
+## See also
+
+- `AGENTS.md` at the project root for conventions and caveats shared
+  across all layers -- e.g. why `detect_data_drift` treats an ongoing
+  trend as a plausible false positive by design, not a bug.

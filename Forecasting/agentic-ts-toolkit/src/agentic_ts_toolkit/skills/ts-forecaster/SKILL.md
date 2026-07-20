@@ -87,3 +87,10 @@ When comparing results:
   SARIMA's," "residuals still show autocorrelation at this lag," "holdout
   window is short relative to the seasonal cycle, treat with some
   skepticism").
+
+## See also
+
+- `AGENTS.md` at the project root for conventions and caveats shared
+  across all layers -- in particular, the gradient-boosted-trees
+  one-step-ahead (here) vs. recursive (`ts-deploy`) evaluation asymmetry
+  is documented there as intentional, not a bug to reconcile.
