@@ -1,9 +1,12 @@
 import json
 
+import pytest
+
 from agentic_ts_toolkit.retrain.retrain_tools import (
     record_deployment,
     load_deployment_manifest,
     compare_candidate_to_deployed,
+    execute_redeploy,
 )
 
 
@@ -97,3 +100,61 @@ def test_compare_candidate_to_deployed_errors_on_missing_metric():
         deployed_metrics={"mape_pct": 5.0},
     )
     assert "error" in result
+
+
+def test_execute_redeploy_refuses_without_confirmation(tmp_path):
+    csv_path = tmp_path / "series.csv"
+    csv_path.write_text("date,value\n2024-01-01,1.0\n")
+
+    result = execute_redeploy(
+        str(csv_path),
+        model_type="sarima",
+        params={},
+        horizon=30,
+        backtest_metrics={"mape_pct": 5.0},
+        confirmed=False,
+    )
+    assert result["status"] == "not_executed"
+    assert "error" in result
+    assert not (tmp_path / "deployment_manifest.json").exists()
+
+
+def test_execute_redeploy_rejects_unknown_model_type(tmp_path):
+    csv_path = tmp_path / "series.csv"
+    csv_path.write_text("date,value\n2024-01-01,1.0\n")
+
+    result = execute_redeploy(
+        str(csv_path),
+        model_type="prophet",
+        params={},
+        horizon=30,
+        backtest_metrics={"mape_pct": 5.0},
+        confirmed=True,
+    )
+    assert "error" in result
+
+
+def test_execute_redeploy_retrains_and_records_manifest(tmp_path):
+    pytest.importorskip("statsmodels")
+    pytest.importorskip("sklearn")
+
+    from agentic_ts_toolkit.data_prep import generate_synthetic_series
+
+    csv_path = tmp_path / "series.csv"
+    generate_synthetic_series(n_days=200).to_csv(csv_path, index=False)
+
+    result = execute_redeploy(
+        str(csv_path),
+        model_type="sarima",
+        params={"order": [1, 1, 1], "seasonal_order": [1, 1, 1, 7]},
+        horizon=10,
+        backtest_metrics={"mape_pct": 4.5},
+        confirmed=True,
+    )
+    assert result["status"] == "redeployed"
+    assert len(result["forecast_result"]["forecast"]) == 10
+    assert result["manifest"]["model"] == "SARIMA"
+
+    loaded = load_deployment_manifest(str(csv_path))
+    assert loaded["backtest_metrics"]["mape_pct"] == 4.5
+    assert loaded["horizon"] == 10

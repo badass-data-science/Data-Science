@@ -1,8 +1,8 @@
 """
 retrain_tools.py
 
-Layer 5: closes the loop after ts-monitor recommends retrain_now. This
-module doesn't refit anything itself -- Layers 1-3 (ts-analyst,
+Layer 5: closes the loop after ts-monitor recommends retrain_now. Most of
+this module doesn't refit anything -- Layers 1-3 (ts-analyst,
 ts-forecaster, ts-deploy) already do that, driven by the agent as usual.
 What's missing without this layer is:
 
@@ -11,11 +11,18 @@ What's missing without this layer is:
 2. A reproducible answer to "is the new candidate actually better enough
    to be worth redeploying," rather than an LLM eyeballing two metric
    dicts and guessing.
+3. A single, explicitly-gated action that actually performs a redeploy,
+   for the cases where a human (or an explicitly authorized autonomous
+   workflow) decides to act on that answer -- see execute_redeploy below.
 
-This layer deliberately does NOT call ts-deploy and never redeploys
-anything itself -- it stops at a recommendation. See
-skills/ts-retrain/SKILL.md for the human-confirmation workflow this is
-meant to be used inside.
+record_deployment/load_deployment_manifest/compare_candidate_to_deployed
+are pure diagnostics with no side effects beyond the manifest file itself.
+execute_redeploy is the one function in this whole toolkit that takes a
+real production action (retrains a model and overwrites the deployment
+manifest) -- it refuses to run unless called with confirmed=True, which is
+never its default. See skills/ts-retrain/SKILL.md for the two ways that
+confirmation is meant to be reached: a human approving in-conversation, or
+an explicitly authorized autonomous mode.
 """
 
 import json
@@ -23,6 +30,8 @@ import os
 from datetime import datetime, timezone
 
 DEFAULT_MANIFEST_FILENAME = "deployment_manifest.json"
+
+_MODEL_TYPES = ("naive", "ets", "sarima", "gbt")
 
 
 def _manifest_path_for(csv_path: str, manifest_path: str = None) -> str:
@@ -159,4 +168,92 @@ def compare_candidate_to_deployed(
         "should_redeploy": should_redeploy,
         "reasoning": reasoning,
         "improvement_threshold_pct": improvement_threshold_pct,
+    }
+
+
+def execute_redeploy(
+    csv_path: str,
+    model_type: str,
+    params: dict,
+    horizon: int,
+    backtest_metrics: dict,
+    confirmed: bool = False,
+    date_col: str = "date",
+    value_col: str = "value",
+    manifest_path: str = None,
+) -> dict:
+    """Actually perform a redeploy: retrain `model_type` on the full series
+    with `params` (delegating to the matching
+    agentic_ts_toolkit.deploy.forecast_tools function) and record the
+    result as the new deployment manifest.
+
+    This refuses to do anything unless `confirmed=True` is passed
+    explicitly -- there is no default that takes action. Passing
+    confirmed=True is meant to happen in exactly two situations (see
+    skills/ts-retrain/SKILL.md): a human has approved this specific
+    redeploy in the current conversation, or an explicitly authorized
+    autonomous-mode instruction covers this series. Don't set it to True
+    just to see what happens.
+
+    `params` should be the same `params` dict a ts-forecaster fit_* call
+    returned for the chosen candidate (fit_sarima/fit_ets/
+    fit_gradient_boosted_trees's `params` fields match forecast_sarima/
+    forecast_ets/forecast_gradient_boosted_trees's keyword arguments
+    exactly). `model_type` must be one of "naive", "ets", "sarima", "gbt".
+
+    Requires the `deploy` extra installed (statsmodels/scikit-learn)
+    regardless of which model_type is used, since it imports
+    agentic_ts_toolkit.deploy.forecast_tools as a whole module.
+    """
+    if not confirmed:
+        return {
+            "status": "not_executed",
+            "error": (
+                "confirmed=True was not passed. execute_redeploy performs a real "
+                "redeploy (retrains the model and overwrites the deployment "
+                "manifest) and refuses to act without an explicit confirmation "
+                "flag -- whether that confirmation came from a human in this "
+                "conversation or from an explicitly authorized autonomous-mode "
+                "instruction. Set confirmed=True only once you actually have that."
+            ),
+        }
+
+    if model_type not in _MODEL_TYPES:
+        return {"error": f"Unknown model_type '{model_type}'. Must be one of {list(_MODEL_TYPES)}."}
+
+    try:
+        from agentic_ts_toolkit.deploy import forecast_tools
+    except ImportError as exc:
+        return {
+            "error": (
+                f"execute_redeploy needs the 'deploy' extra installed to retrain "
+                f"and forecast ({exc}). Run: pip install -e \".[deploy]\""
+            )
+        }
+
+    from agentic_ts_toolkit.data_prep import load_series
+
+    df = load_series(csv_path, date_col, value_col)
+
+    dispatch = {
+        "naive": forecast_tools.forecast_naive,
+        "ets": forecast_tools.forecast_ets,
+        "sarima": forecast_tools.forecast_sarima,
+        "gbt": forecast_tools.forecast_gradient_boosted_trees,
+    }
+    forecast_result = dispatch[model_type](df, horizon=horizon, **params)
+
+    manifest_result = record_deployment(
+        csv_path,
+        model=forecast_result["model"],
+        params=params,
+        backtest_metrics=backtest_metrics,
+        horizon=horizon,
+        manifest_path=manifest_path,
+    )
+
+    return {
+        "status": "redeployed",
+        "forecast_result": forecast_result,
+        "manifest": manifest_result["manifest"],
     }

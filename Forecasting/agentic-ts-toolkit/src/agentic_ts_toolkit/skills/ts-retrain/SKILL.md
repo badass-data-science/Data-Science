@@ -1,16 +1,32 @@
 ---
 name: ts-retrain
-description: Close the loop after ts-monitor recommends retrain_now -- re-run analyst/forecaster, decide deterministically whether a fresh candidate beats what's deployed, and stop for human confirmation before redeploying.
+description: Close the loop after ts-monitor recommends retrain_now -- re-run analyst/forecaster, decide deterministically whether a fresh candidate beats what's deployed, and only redeploy with an explicit confirmation (human, in the default mode, or a pre-authorized autonomous mode).
 ---
 
 # Time Series Retrain Cycle
 
 You are acting on a `retrain_now` (or `investigate`) verdict from
 `ts-monitor__recommend_retraining`. Your job is to find out whether
-retraining actually produces something worth deploying -- not to redeploy
-automatically. This skill NEVER calls `ts-deploy` itself; it stops with a
-recommendation and waits for a human to confirm before anything gets
-redeployed.
+retraining actually produces something worth deploying, then act on that
+answer through exactly one gated tool call --
+`ts-retrain__execute_redeploy` -- which refuses to do anything unless
+called with `confirmed=True`.
+
+There are two modes for reaching that confirmation. **Default to human
+mode unless autonomous mode is unambiguously authorized** -- when in
+doubt, ask rather than assume.
+
+- **Human-confirmed mode (default)**: after getting the deterministic
+  verdict, stop and report it. Only call `execute_redeploy` in a
+  follow-up turn, after a human has explicitly told you to proceed.
+- **Autonomous mode (opt-in only)**: skip the pause and call
+  `execute_redeploy(confirmed=True)` directly the moment the verdict says
+  `should_redeploy: true` -- but ONLY if you have been explicitly told,
+  either in the current conversation or via a standing project-level
+  instruction, that autonomous retraining is authorized for this specific
+  series. "The user seems busy" or "this looks like a low-stakes series"
+  are not authorization. If you're not certain autonomous mode applies,
+  treat it as not authorized and fall back to human-confirmed mode.
 
 ## Prerequisites
 
@@ -32,10 +48,17 @@ You need:
   decision: does a freshly backtested candidate beat the deployed model by
   more than a threshold (default 10% relative improvement)? Call this
   rather than eyeballing whether the new numbers "look better."
-- `ts-retrain__record_deployment` — writes the manifest. Only call this
-  yourself AFTER the user has confirmed a redeploy AND you've actually run
-  `ts-deploy` with the new settings -- never call it speculatively, and
-  never as part of this skill's own automatic flow.
+- `ts-retrain__execute_redeploy` — the one tool in this skill that takes a
+  real action: retrains `model_type` with `params` on the full series and
+  overwrites the deployment manifest. Refuses to run unless called with
+  `confirmed=True` -- see the two modes above for when that's appropriate.
+  `params` should be passed through unchanged from the `params` field your
+  chosen candidate's `ts-forecaster` `fit_*` result returned.
+- `ts-retrain__record_deployment` — writes the manifest directly, without
+  retraining anything. Only useful if you deployed by some path outside
+  this skill (e.g. you ran `ts-deploy`'s tools manually) and just need to
+  record it; prefer `execute_redeploy` when this skill is driving the
+  actual redeploy.
 
 ## Step 1 — Load the current deployment record
 
@@ -72,22 +95,38 @@ tool's output -- if its verdict surprises you given what you saw in Step
 2, say so as a caveat in your report, but still report what it actually
 returned.
 
-## Step 4 — Write your report and stop
+## Step 4 — Act (or stop), depending on mode
 
+First, always report:
 - **Why this cycle ran**: the `ts-monitor` verdict that triggered it.
 - **What changed in Steps 1-2**: anything notable from re-running
   `ts-analyst` (e.g. a newly detected anomaly, a shifted seasonal
   strength), and which candidate you selected in `ts-forecaster` and why.
 - **The verdict**: `compare_candidate_to_deployed`'s `should_redeploy` and
   its `reasoning`, stated plainly.
-- **What happens next**:
-  - If `should_redeploy` is true: tell the user exactly what you'd deploy
-    (model + params) and ask them to confirm. Only after they say go,
-    run the `ts-deploy` skill with those settings, then call
-    `ts-retrain__record_deployment` to update the manifest. Do not do
-    this in the same turn without confirmation.
-  - If `should_redeploy` is false: say the current deployment stays as
-    is, and note that retraining alone didn't resolve whatever
-    `ts-monitor` flagged -- worth a closer human look at whether this
-    needs a different model family or feature set, not just fresh
-    parameters of the same one.
+
+Then, if `should_redeploy` is false: say the current deployment stays as
+is, and note that retraining alone didn't resolve whatever `ts-monitor`
+flagged -- worth a closer human look at whether this needs a different
+model family or feature set, not just fresh parameters of the same one.
+Stop here; there is nothing to redeploy.
+
+If `should_redeploy` is true, which mode applies (see the top of this
+skill)?
+
+- **Human-confirmed mode**: state exactly what you'd deploy (`model_type`
+  + `params`, carried over unchanged from your Step 2 candidate) and ask
+  the user to confirm. Only after they say go -- in this turn or a later
+  one -- call `execute_redeploy(..., confirmed=True)`. Do not call it
+  before that confirmation exists.
+- **Autonomous mode (only if unambiguously authorized)**: state in your
+  report that autonomous mode is active and why you believe it's
+  authorized for this series, then call
+  `execute_redeploy(..., confirmed=True)` directly in this same turn.
+  Report the result (the new forecast and the updated manifest) alongside
+  everything above -- don't let an autonomous action pass without being
+  visibly reported just because no one had to approve it first.
+
+In both modes, `execute_redeploy` is the only tool that should ever
+actually change the deployment -- never call `ts-deploy`'s tools directly
+from within this skill as a substitute.

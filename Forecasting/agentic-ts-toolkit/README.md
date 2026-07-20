@@ -206,23 +206,45 @@ Before actually publishing, you'll want to:
 - **`ts-monitor__recommend_retraining` is deliberately deterministic
   rather than left to model judgment** -- "should we retrain" is the kind
   of decision worth being reproducible given the same inputs.
-- **`ts-retrain` never calls `ts-deploy` and never redeploys anything
-  itself** -- it re-runs Layers 1-2, then hands the resulting candidate to
-  `ts-retrain__compare_candidate_to_deployed` (deterministic, same reason
-  as `recommend_retraining` above) and stops. Redeploying is a separate,
-  human-confirmed step.
+- **`ts-retrain` only ever changes the deployment through one gated tool,
+  `ts-retrain__execute_redeploy`** -- it re-runs Layers 1-2, hands the
+  resulting candidate to `ts-retrain__compare_candidate_to_deployed`
+  (deterministic, same reason as `recommend_retraining` above), and
+  `execute_redeploy` itself refuses to do anything unless called with
+  `confirmed=True`. There is no default that takes action.
+- **`ts-retrain` supports two ways of reaching that confirmation**: the
+  default is a human explicitly approving the redeploy in conversation.
+  An *optional autonomous mode* exists for when a human or a standing
+  project instruction has explicitly pre-authorized unattended retraining
+  for a specific series -- in that mode, the skill calls
+  `execute_redeploy(confirmed=True)` itself the moment
+  `should_redeploy: true` comes back, with no pause. Autonomous mode is
+  never assumed; the skill's own instructions tell it to fall back to
+  human-confirmed mode whenever authorization is ambiguous.
 - **`ts-retrain`'s deployment manifest is the only piece of durable state
   in the whole toolkit** -- a JSON file (`deployment_manifest.json` by
   default, written next to the series CSV) recording what model/params/
   backtest metrics are currently deployed. Nothing else persists between
   calls; every other tool is a pure function of its inputs.
+- **`execute_redeploy` requires the `deploy` extra installed** (it
+  delegates to `agentic_ts_toolkit.deploy.forecast_tools`), regardless of
+  which `model_type` is requested, since it imports that module as a
+  whole. `ts-retrain`'s diagnostic tools (`load_deployment_manifest`,
+  `compare_candidate_to_deployed`, `record_deployment`) have no such
+  requirement.
 
 ## Next steps
 
-With Layer 5 in place, a natural follow-up is an *optional* autonomous
-mode: given explicit opt-in (e.g. a flag or a standing instruction), skip
-the human-confirmation pause in Step 4 of `ts-retrain`'s workflow and let
-a `should_redeploy: true` verdict chain straight into `ts-deploy` and
-`record_deployment`. Deliberately not the default -- redeploying a live
-forecast unattended is a meaningfully different risk than the read-only
-diagnostics every other layer performs.
+Layer 5's optional autonomous mode (see above) is now built: `ts-retrain`
+can either pause for human confirmation before redeploying, or -- given
+explicit, unambiguous authorization for a specific series -- call
+`execute_redeploy(confirmed=True)` itself the moment
+`should_redeploy: true` comes back. The confirmation gate itself
+(`execute_redeploy` refusing to act without `confirmed=True`) is
+mechanical and tested; the *authorization* decision for autonomous mode
+is still a prose contract enforced by the skill's own judgment, not a
+config flag the code checks. A natural follow-up here would be making
+that authorization inspectable/auditable outside the conversation itself
+-- e.g. a small opt-in record (which series, since when, by whom) stored
+next to the deployment manifest, so "is autonomous mode on for this
+series" doesn't depend solely on what the agent remembers being told.

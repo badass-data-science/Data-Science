@@ -23,6 +23,7 @@ from .retrain_tools import (
     record_deployment as _record_deployment,
     load_deployment_manifest as _load_deployment_manifest,
     compare_candidate_to_deployed as _compare_candidate_to_deployed,
+    execute_redeploy as _execute_redeploy,
 )
 
 mcp = FastMCP("ts-retrain")
@@ -108,6 +109,58 @@ def compare_candidate_to_deployed(
         deployed_metrics,
         metric_name=metric_name,
         improvement_threshold_pct=improvement_threshold_pct,
+    )
+
+
+@mcp.tool()
+def execute_redeploy(
+    csv_path: str,
+    model_type: str,
+    params: dict,
+    horizon: int,
+    backtest_metrics: dict,
+    confirmed: bool = False,
+    date_col: str = "date",
+    value_col: str = "value",
+    manifest_path: Optional[str] = None,
+) -> dict:
+    """Actually perform a redeploy: retrain model_type on the full series
+    with params (delegating to the matching ts-deploy forecast function)
+    and record the result as the new deployment manifest.
+
+    Refuses to do anything unless confirmed=True is passed explicitly --
+    there is no default that takes action. Only pass confirmed=True in one
+    of two situations (see the ts-retrain SKILL.md): a human has approved
+    this specific redeploy in the current conversation, or an explicitly
+    authorized autonomous-mode instruction covers this series.
+
+    Args:
+        csv_path: Path to the series CSV to retrain and forecast on.
+        model_type: One of "naive", "ets", "sarima", "gbt".
+        params: The params dict a ts-forecaster fit_* call returned for
+            the chosen candidate -- pass it through unchanged. For "naive",
+            use {"method": ..., "seasonal_period": ...} matching
+            forecast_naive's arguments.
+        horizon: Forecast horizon in steps.
+        backtest_metrics: The chosen candidate's backtest_metrics, to
+            record in the new deployment manifest.
+        confirmed: Must be explicitly True or this call is a no-op that
+            returns an explanatory error.
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+        manifest_path: Where to write the manifest. Defaults to
+            deployment_manifest.json next to csv_path.
+    """
+    return _execute_redeploy(
+        csv_path,
+        model_type=model_type,
+        params=params,
+        horizon=horizon,
+        backtest_metrics=backtest_metrics,
+        confirmed=confirmed,
+        date_col=date_col,
+        value_col=value_col,
+        manifest_path=manifest_path,
     )
 
 
