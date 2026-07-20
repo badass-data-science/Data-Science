@@ -178,6 +178,56 @@ def residual_diagnostics(residuals, lags: int = 10, alpha: float = 0.05) -> dict
     }
 
 
+def _aicc(aic: float, n: int, k: int):
+    """Corrected AIC (Hurvich & Tsai, 1989) for small samples: AIC's bias
+    grows as the number of estimated parameters k approaches the sample
+    size n, which matters here since fit_ets/fit_sarima are often fit on
+    a few hundred observations at most. AICc = AIC + 2k(k+1)/(n-k-1).
+    Undefined (returns None) when n-k-1 <= 0 -- too few observations
+    relative to parameters for the correction itself to make sense.
+    """
+    denom = n - k - 1
+    if denom <= 0:
+        return None
+    return round(aic + (2 * k * (k + 1)) / denom, 2)
+
+
+def _interval_coverage(y_true: np.ndarray, lower: np.ndarray, upper: np.ndarray, confidence_level: float) -> dict:
+    """Empirical coverage of a prediction interval against real holdout
+    values: what fraction of actuals actually fell inside their interval,
+    vs. the nominal confidence level. Same shape/logic as
+    ts-monitor__compare_forecast_to_actuals's interval_coverage field
+    (including its well_calibrated threshold of 15 percentage points),
+    deliberately -- this is the same check, just run during backtesting
+    instead of after deployment, so a badly-calibrated interval gets
+    caught before it ever ships.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    within = int(np.sum((y_true >= lower) & (y_true <= upper)))
+    coverage_pct = round(100 * within / len(y_true), 2)
+    nominal_pct = round(confidence_level * 100, 2)
+    well_calibrated = bool(abs(coverage_pct - nominal_pct) <= 15)
+    return {
+        "confidence_level": confidence_level,
+        "empirical_coverage_pct": coverage_pct,
+        "nominal_confidence_pct": nominal_pct,
+        "well_calibrated": well_calibrated,
+        "interpretation": (
+            f"{coverage_pct}% of holdout actuals fell within their backtest prediction interval, "
+            f"vs. a nominal {nominal_pct}%. "
+            + (
+                "Reasonably close to nominal -- interval looks calibrated."
+                if well_calibrated
+                else "Notably off from nominal -- the interval is likely too narrow (if coverage is "
+                "low) or too wide (if coverage is much higher than nominal), and shouldn't be "
+                "trusted at face value if this model is deployed."
+            )
+        ),
+    }
+
+
 def fit_naive_baselines(
     df: pd.DataFrame,
     holdout_size: int = 30,
@@ -236,6 +286,7 @@ def fit_ets(
     damped_trend: bool = False,
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
+    n_simulations: int = 500,
     seed: int = 42,
 ) -> dict:
     """Fit Holt-Winters exponential smoothing (ETS) on the training split,
@@ -243,6 +294,18 @@ def fit_ets(
     backtest_metrics includes a bootstrap confidence interval (see
     compute_metrics_with_ci); holdout_actuals/holdout_predicted let this
     result be compared against another model with diebold_mariano_test.
+    aicc is the small-sample-corrected AIC (see _aicc) -- prefer it over
+    aic when comparing models fit on a modest training window.
+
+    Also simulates a prediction interval for the holdout (same approach
+    as ts-deploy's forecast_ets: fit.simulate, n_simulations paths) and
+    checks its empirical coverage against the REAL holdout values (see
+    backtest_interval_coverage) -- the same check
+    ts-monitor__compare_forecast_to_actuals runs post-deployment, just
+    run here first so a badly-calibrated interval gets caught before it
+    ships. If simulation fails for this parameter combination,
+    backtest_interval_coverage reports that explicitly rather than
+    silently omitting the check.
     """
     train, test = train_test_split(df, holdout_size)
     y_test = test["value"].values
@@ -257,13 +320,26 @@ def fit_ets(
     fit = model.fit()
     forecast = fit.forecast(holdout_size).values
 
+    try:
+        sims = fit.simulate(nsimulations=holdout_size, repetitions=n_simulations, error="add")
+        alpha = 1 - confidence_level
+        lower = sims.quantile(alpha / 2, axis=1).values
+        upper = sims.quantile(1 - alpha / 2, axis=1).values
+        backtest_interval_coverage = _interval_coverage(y_test, lower, upper, confidence_level)
+    except Exception as exc:
+        backtest_interval_coverage = {
+            "error": f"Simulation-based interval failed for this parameter combination ({exc})."
+        }
+
     return {
         "model": "ETS (Holt-Winters)",
         "params": {"trend": trend, "seasonal": seasonal, "seasonal_period": seasonal_period, "damped_trend": damped_trend},
         "aic": round(float(fit.aic), 2),
+        "aicc": _aicc(float(fit.aic), len(train), len(fit.params)),
         "backtest_metrics": compute_metrics_with_ci(
             y_test, forecast, n_bootstrap=n_bootstrap, confidence_level=confidence_level, seed=seed
         ),
+        "backtest_interval_coverage": backtest_interval_coverage,
         "residual_diagnostics": residual_diagnostics(fit.resid),
         "holdout_actuals": [round(float(v), 4) for v in y_test],
         "holdout_predicted": [round(float(v), 4) for v in forecast],
@@ -283,7 +359,17 @@ def fit_sarima(
     holdout window, and evaluate against real values. backtest_metrics
     includes a bootstrap confidence interval (see compute_metrics_with_ci);
     holdout_actuals/holdout_predicted let this result be compared against
-    another model with diebold_mariano_test.
+    another model with diebold_mariano_test. aicc is the small-sample-
+    corrected AIC (see _aicc) -- prefer it over aic when comparing models
+    fit on a modest training window.
+
+    Also computes the analytic confidence interval for the holdout
+    forecast (SARIMAX provides this directly, no simulation needed) and
+    checks its empirical coverage against the REAL holdout values (see
+    backtest_interval_coverage) -- the same check
+    ts-monitor__compare_forecast_to_actuals runs post-deployment, just
+    run here first so a badly-calibrated interval gets caught before it
+    ships.
 
     order: (p, d, q) non-seasonal ARIMA order. Default [1, 1, 1].
     seasonal_order: (P, D, Q, s) seasonal order. Default [1, 1, 1, 7].
@@ -305,16 +391,22 @@ def fit_sarima(
         enforce_invertibility=False,
     )
     fit = model.fit(disp=False)
-    forecast = fit.get_forecast(steps=holdout_size).predicted_mean.values
+    prediction = fit.get_forecast(steps=holdout_size)
+    forecast = prediction.predicted_mean.values
+
+    ci = prediction.conf_int(alpha=1 - confidence_level)
+    backtest_interval_coverage = _interval_coverage(y_test, ci.iloc[:, 0].values, ci.iloc[:, 1].values, confidence_level)
 
     return {
         "model": "SARIMA",
         "params": {"order": list(order), "seasonal_order": list(seasonal_order)},
         "aic": round(float(fit.aic), 2),
+        "aicc": _aicc(float(fit.aic), len(train), len(fit.params)),
         "bic": round(float(fit.bic), 2),
         "backtest_metrics": compute_metrics_with_ci(
             y_test, forecast, n_bootstrap=n_bootstrap, confidence_level=confidence_level, seed=seed
         ),
+        "backtest_interval_coverage": backtest_interval_coverage,
         "residual_diagnostics": residual_diagnostics(fit.resid),
         "holdout_actuals": [round(float(v), 4) for v in y_test],
         "holdout_predicted": [round(float(v), 4) for v in forecast],
@@ -528,5 +620,295 @@ def diebold_mariano_test(
                 "on this holdout -- treat the two models as roughly equally accurate here, even if "
                 "their point error metrics differ numerically."
             )
+        ),
+    }
+
+
+_ROLLING_ORIGIN_FIT_FUNCTIONS = {
+    "ets": fit_ets,
+    "sarima": fit_sarima,
+    "gbt": fit_gradient_boosted_trees,
+}
+
+
+def rolling_origin_backtest(
+    df: pd.DataFrame,
+    model_type: str,
+    params: dict = None,
+    holdout_size: int = 30,
+    n_origins: int = 5,
+    n_bootstrap: int = 200,
+    seed: int = 42,
+) -> dict:
+    """Walk-forward (expanding-window) backtest: repeat fit_ets/fit_sarima/
+    fit_gradient_boosted_trees at n_origins different points in the
+    series, each time training on everything available up to that origin
+    and testing on the holdout_size window immediately after it, instead
+    of evaluating against a single fixed holdout window.
+
+    A single fixed holdout (what every other fit_* call does on its own)
+    is one arbitrarily-chosen slice of the series -- if that slice
+    happened to contain an anomaly, or the trend/seasonality lined up
+    unusually well or badly for one model, every metric computed from it
+    (including that same call's own bootstrap CI, which only resamples
+    POINTS WITHIN that one window) inherits the bias. This runs the SAME
+    model/params at multiple non-overlapping origins (walking backward
+    from the most recent complete window) and reports the distribution
+    of backtest performance across them -- mean, std, and per-origin
+    detail -- which is a genuine measure of how STABLE this model's
+    performance actually is across different stretches of the series,
+    not just a single snapshot.
+
+    model_type must be "ets", "sarima", or "gbt" (not "naive" -- the
+    naive baselines are a cheap, non-parametric floor-check, not
+    something that benefits from walk-forward rigor the way a fitted
+    model does). params is passed through unchanged as the matching
+    fit_* function's keyword arguments (e.g. for "sarima":
+    {"order": [1,1,1], "seasonal_order": [1,1,1,7]}).
+
+    Requires at least holdout_size * (n_origins + 1) observations (each
+    origin needs a full holdout_size test window, plus at least some
+    training data before the earliest origin). Each origin refits the
+    model from scratch -- this is n_origins times the compute of a single
+    fit_* call, by design; that's the actual cost of getting genuine
+    walk-forward evidence rather than reusing one fit.
+
+    Args:
+        model_type: "ets", "sarima", or "gbt".
+        params: Keyword arguments for the matching fit_* function
+            (excluding df, holdout_size, n_bootstrap, confidence_level,
+            seed, which this function manages itself).
+        holdout_size: Test window size at each origin.
+        n_origins: How many non-overlapping origins to evaluate.
+        n_bootstrap: Bootstrap resamples for each origin's OWN backtest
+            metric CI (kept modest by default since this runs
+            n_origins times; the cross-origin mean/std below is the
+            headline stability measure, not each origin's own CI).
+        seed: Random seed, for reproducibility (both the per-origin
+            bootstrap and, indirectly, gbt's deterministic fit).
+    """
+    if model_type not in _ROLLING_ORIGIN_FIT_FUNCTIONS:
+        return {
+            "error": (
+                f"model_type must be one of {list(_ROLLING_ORIGIN_FIT_FUNCTIONS)}, got {model_type!r} "
+                "(naive baselines aren't supported here -- they don't need walk-forward validation)."
+            )
+        }
+    params = params or {}
+    fit_fn = _ROLLING_ORIGIN_FIT_FUNCTIONS[model_type]
+
+    n = len(df)
+    min_required = holdout_size * (n_origins + 1)
+    if n < min_required:
+        return {
+            "error": (
+                f"Need at least {min_required} observations for {n_origins} origins of "
+                f"holdout_size={holdout_size} (got {n}). Reduce n_origins or holdout_size."
+            )
+        }
+
+    origins = []
+    for i in range(n_origins):
+        test_end = n - holdout_size * i
+        df_slice = df.iloc[:test_end].reset_index(drop=True)
+        try:
+            result = fit_fn(df_slice, holdout_size=holdout_size, n_bootstrap=n_bootstrap, seed=seed, **params)
+        except Exception as exc:
+            origins.append({"origin_index": i, "error": f"Fit failed at this origin: {exc}"})
+            continue
+
+        metrics = result["backtest_metrics"]
+        origins.append(
+            {
+                "origin_index": i,
+                "train_size": test_end - holdout_size,
+                "test_range": [
+                    str(df_slice["date"].iloc[-holdout_size].date()),
+                    str(df_slice["date"].iloc[-1].date()),
+                ],
+                "mae": metrics["mae"],
+                "rmse": metrics["rmse"],
+                "mape_pct": metrics["mape_pct"],
+            }
+        )
+    # Chronological order (origin 0 above is the most recent; reverse so
+    # the report reads oldest-to-newest, matching how a human would scan it).
+    origins.reverse()
+
+    successful = [o for o in origins if "error" not in o]
+    n_failed = len(origins) - len(successful)
+    if not successful:
+        return {"error": f"All {n_origins} origins failed to fit.", "origins": origins}
+
+    def _mean_std(key):
+        values = [o[key] for o in successful if o[key] is not None]
+        if not values:
+            return None, None
+        return round(float(np.mean(values)), 4), round(float(np.std(values, ddof=1)) if len(values) > 1 else 0.0, 4)
+
+    mae_mean, mae_std = _mean_std("mae")
+    rmse_mean, rmse_std = _mean_std("rmse")
+    mape_mean, mape_std = _mean_std("mape_pct")
+
+    instability_note = ""
+    if mape_mean is not None and mape_mean > 0 and mape_std is not None:
+        cv = mape_std / mape_mean
+        if cv > 0.5:
+            instability_note = (
+                f" MAPE varies a lot across origins (relative spread {round(cv, 2)}) -- this model's "
+                "performance looks unstable across different stretches of the series, not just "
+                "noisy within one holdout."
+            )
+
+    return {
+        "model_type": model_type,
+        "params": params,
+        "holdout_size": holdout_size,
+        "n_origins": n_origins,
+        "n_origins_failed": n_failed,
+        "origins": origins,
+        "mae_mean": mae_mean,
+        "mae_std": mae_std,
+        "rmse_mean": rmse_mean,
+        "rmse_std": rmse_std,
+        "mape_pct_mean": mape_mean,
+        "mape_pct_std": mape_std,
+        "interpretation": (
+            f"Across {len(successful)} origin(s) (holdout_size={holdout_size} each), MAPE averaged "
+            f"{mape_mean}% (std {mape_std})."
+            + (f" {n_failed} origin(s) failed to fit and were excluded." if n_failed else "")
+            + instability_note
+        ),
+    }
+
+
+def search_sarima_orders(
+    df: pd.DataFrame,
+    holdout_size: int = 30,
+    seasonal_period: int = 7,
+    d: int = 1,
+    seasonal_d: int = 1,
+    max_p: int = 2,
+    max_q: int = 2,
+    max_seasonal_p: int = 1,
+    max_seasonal_q: int = 1,
+    top_n: int = 5,
+    max_combinations: int = 60,
+    n_bootstrap_per_candidate: int = 200,
+) -> dict:
+    """Advisory grid search over SARIMA (p,q)(P,Q) combinations -- d and
+    seasonal_d are held FIXED (pass them explicitly, informed by
+    ts-analyst's stationarity findings, e.g. d=0 if check_stationarity
+    already found the series stationary; don't accept the defaults
+    blindly), while p, q, P, Q are searched over the given ranges.
+    Candidates are ranked by AICc where available (falling back to AIC),
+    reusing fit_sarima for every candidate so the fitting logic isn't
+    duplicated.
+
+    THIS IS A SHORTLIST, NOT AN AUTHORITY. ts-forecaster's whole design
+    asks the agent to reason about model settings from ts-analyst's
+    findings (see this skill's Step 3), not pick blindly -- this tool
+    doesn't change that. A numerically-best AICc candidate can still have
+    structurally deficient residuals (check residual_diagnostics on
+    whichever candidate you actually pick, via a direct fit_sarima call,
+    same as always), or be a razor-thin, not-meaningfully-different
+    winner over the next candidate (consider diebold_mariano_test if the
+    top two are close). Treat this tool's output as a starting point for
+    your own judgment, not a replacement for it.
+
+    Bounded by max_combinations (default 60) to avoid runaway compute --
+    each candidate is a full SARIMA fit, so a large grid can take
+    minutes. Combinations that fail to converge are skipped and counted,
+    not treated as an error.
+
+    Args:
+        holdout_size: Backtest window size for every candidate.
+        seasonal_period: Seasonal cycle length (the `s` in [P,D,Q,s]).
+        d: Non-seasonal differencing order, held fixed across the search.
+        seasonal_d: Seasonal differencing order, held fixed.
+        max_p: Search p in range(0, max_p + 1).
+        max_q: Search q in range(0, max_q + 1).
+        max_seasonal_p: Search P in range(0, max_seasonal_p + 1).
+        max_seasonal_q: Search Q in range(0, max_seasonal_q + 1).
+        top_n: How many top candidates to return in full.
+        max_combinations: Safety cap on grid size; errors instead of
+            running if the requested ranges would exceed it.
+        n_bootstrap_per_candidate: Bootstrap resamples for each
+            candidate's own metric CI (kept modest since this runs many
+            fits; re-run fit_sarima directly with a higher n_bootstrap
+            on your final pick if you want a tighter CI on it).
+    """
+    combos = [
+        (p, d, q, seasonal_p, seasonal_d, seasonal_q)
+        for p in range(0, max_p + 1)
+        for q in range(0, max_q + 1)
+        for seasonal_p in range(0, max_seasonal_p + 1)
+        for seasonal_q in range(0, max_seasonal_q + 1)
+    ]
+    if len(combos) > max_combinations:
+        return {
+            "error": (
+                f"Requested grid has {len(combos)} combinations, exceeding "
+                f"max_combinations={max_combinations}. Narrow max_p/max_q/max_seasonal_p/"
+                "max_seasonal_q, or raise max_combinations explicitly if you really want this many."
+            )
+        }
+
+    candidates = []
+    n_failed = 0
+    for p, d_, q, seasonal_p, seasonal_d_, seasonal_q in combos:
+        order = [p, d_, q]
+        seasonal_order = [seasonal_p, seasonal_d_, seasonal_q, seasonal_period]
+        try:
+            result = fit_sarima(
+                df,
+                holdout_size=holdout_size,
+                order=order,
+                seasonal_order=seasonal_order,
+                n_bootstrap=n_bootstrap_per_candidate,
+            )
+        except Exception:
+            n_failed += 1
+            continue
+
+        candidates.append(
+            {
+                "order": order,
+                "seasonal_order": seasonal_order,
+                "aic": result["aic"],
+                "aicc": result["aicc"],
+                "bic": result["bic"],
+                "backtest_metrics": {
+                    "mae": result["backtest_metrics"]["mae"],
+                    "rmse": result["backtest_metrics"]["rmse"],
+                    "mape_pct": result["backtest_metrics"]["mape_pct"],
+                },
+                "residuals_look_like_white_noise": result["residual_diagnostics"].get(
+                    "residuals_look_like_white_noise"
+                ),
+            }
+        )
+
+    if not candidates:
+        return {"error": f"All {len(combos)} candidate orders failed to fit."}
+
+    def _rank_key(c):
+        return c["aicc"] if c["aicc"] is not None else c["aic"]
+
+    candidates.sort(key=_rank_key)
+    top = candidates[0]
+
+    return {
+        "n_combinations_tried": len(combos),
+        "n_failed_to_fit": n_failed,
+        "top_candidates": candidates[:top_n],
+        "interpretation": (
+            f"Best by AICc: order={top['order']}, seasonal_order={top['seasonal_order']} "
+            f"({'AICc' if top['aicc'] is not None else 'AIC'}={_rank_key(top)}, "
+            f"backtest MAPE={top['backtest_metrics']['mape_pct']}%, "
+            f"residuals_look_like_white_noise={top['residuals_look_like_white_noise']}). "
+            "This is a shortlist, not a final answer -- verify residual diagnostics on whichever "
+            "candidate you pick with a direct fit_sarima call, and consider diebold_mariano_test "
+            "if the top two candidates are close."
         ),
     }

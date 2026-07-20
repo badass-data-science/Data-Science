@@ -332,6 +332,42 @@ Before actually publishing, you'll want to:
   This test tells you whether two models' error numbers differ
   significantly; it does NOT resolve the one-step-ahead-vs-recursive
   evaluation mismatch below when comparing across that boundary.
+- **`fit_ets`/`fit_sarima` now also report `aicc`** (small-sample-corrected
+  AIC, Hurvich & Tsai 1989 -- `None` when the training size is too small
+  relative to the parameter count for the correction to make sense)
+  **and `backtest_interval_coverage`** -- a prediction interval built
+  during the backtest (simulated for ETS, analytic for SARIMA) checked
+  against the REAL holdout values, using the exact same coverage-check
+  shape/logic (and 15-percentage-point `well_calibrated` threshold) as
+  `ts-monitor__compare_forecast_to_actuals`. This catches a badly
+  calibrated interval during backtesting, before it's ever deployed,
+  instead of waiting for `ts-monitor` to notice after the fact.
+- **`ts-forecaster__rolling_origin_backtest` addresses a real limitation
+  every other tool in this layer still has**: every `fit_*` call
+  evaluates against a single, arbitrarily-chosen fixed holdout window --
+  even the bootstrap CI above only resamples points *within* that one
+  window, so a single unlucky/lucky holdout period still biases
+  everything computed from it. This repeats `fit_ets`/`fit_sarima`/
+  `fit_gradient_boosted_trees` (not `fit_naive_baselines` -- naive
+  baselines don't need walk-forward rigor) at multiple non-overlapping
+  origins with an expanding training window, and reports the mean/std of
+  backtest MAE/RMSE/MAPE across origins -- a large std relative to the
+  mean is a genuine, direct measure that a model's apparent edge isn't
+  stable across different stretches of the series. Costs `n_origins`
+  times a single fit, since each origin genuinely refits the model.
+- **`ts-forecaster__search_sarima_orders` is an advisory grid search, not
+  an authority.** It searches `(p,q)(P,Q)` combinations (with `d`/
+  `seasonal_d` held fixed -- pass them explicitly, informed by
+  `ts-analyst`'s stationarity findings, not searched) ranked by AICc,
+  reusing `fit_sarima` for every candidate so the fitting logic isn't
+  duplicated. This is deliberately scoped to not replace the project's
+  existing "the agent reasons about settings from Layer 1 findings"
+  design (see `ts-forecaster/SKILL.md`) -- verified directly on the
+  project's own synthetic data that the numerically-best-AICc candidate
+  can still have `residuals_look_like_white_noise: false`, i.e. a
+  candidate this search ranks first can still be a worse choice by other
+  criteria the agent needs to check regardless. Bounded by
+  `max_combinations` (default 60) to avoid runaway compute.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.

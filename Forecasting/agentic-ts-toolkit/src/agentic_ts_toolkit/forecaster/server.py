@@ -23,6 +23,8 @@ from .model_tools import (
     fit_gradient_boosted_trees as _fit_gradient_boosted_trees,
     train_test_split as _train_test_split,
     diebold_mariano_test as _diebold_mariano_test,
+    rolling_origin_backtest as _rolling_origin_backtest,
+    search_sarima_orders as _search_sarima_orders,
 )
 
 mcp = FastMCP("ts-forecaster")
@@ -108,16 +110,22 @@ def fit_ets(
     damped_trend: bool = False,
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
+    n_simulations: int = 500,
     seed: int = 42,
     date_col: str = "date",
     value_col: str = "value",
 ) -> dict:
     """Fit Holt-Winters exponential smoothing (ETS) on the training split,
     forecast the holdout window, and return backtest error metrics
-    (including a bootstrap confidence interval) plus AIC and a residual
+    (including a bootstrap confidence interval) plus AIC/AICc (small-
+    sample-corrected AIC -- prefer it over AIC) and a residual
     autocorrelation diagnostic (Ljung-Box, with its own effect size).
-    Also returns holdout_actuals/holdout_predicted so this result can be
-    compared against another model with diebold_mariano_test.
+    Also simulates a prediction interval for the holdout and reports its
+    empirical coverage against the real values (backtest_interval_coverage
+    -- the same check ts-monitor__compare_forecast_to_actuals runs
+    post-deployment, just run here first). Also returns
+    holdout_actuals/holdout_predicted so this result can be compared
+    against another model with diebold_mariano_test.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
@@ -127,7 +135,10 @@ def fit_ets(
         seasonal: "add", "mul", or None.
         damped_trend: Whether to damp the trend component.
         n_bootstrap: Bootstrap resamples for the backtest metrics' CI.
-        confidence_level: Confidence level for that CI, e.g. 0.95 for 95%.
+        confidence_level: Confidence level for that CI and the prediction
+            interval coverage check, e.g. 0.95 for 95%.
+        n_simulations: Simulated future paths used to build the backtest
+            prediction interval.
         seed: Random seed for the bootstrap, for reproducibility.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
@@ -142,6 +153,7 @@ def fit_ets(
         damped_trend=damped_trend,
         n_bootstrap=n_bootstrap,
         confidence_level=confidence_level,
+        n_simulations=n_simulations,
         seed=seed,
     )
 
@@ -160,8 +172,13 @@ def fit_sarima(
 ) -> dict:
     """Fit a SARIMA model on the training split, forecast the holdout
     window, and return backtest error metrics (including a bootstrap
-    confidence interval) plus AIC/BIC and a residual autocorrelation
-    diagnostic (Ljung-Box, with its own effect size). Also returns
+    confidence interval) plus AIC/AICc/BIC (AICc is the small-sample-
+    corrected AIC -- prefer it over AIC) and a residual autocorrelation
+    diagnostic (Ljung-Box, with its own effect size). Also computes the
+    analytic prediction interval for the holdout and reports its
+    empirical coverage against the real values (backtest_interval_coverage
+    -- the same check ts-monitor__compare_forecast_to_actuals runs
+    post-deployment, just run here first). Also returns
     holdout_actuals/holdout_predicted so this result can be compared
     against another model with diebold_mariano_test.
 
@@ -171,7 +188,8 @@ def fit_sarima(
         order: [p, d, q] non-seasonal ARIMA order. Defaults to [1, 1, 1].
         seasonal_order: [P, D, Q, s] seasonal order. Defaults to [1, 1, 1, 7].
         n_bootstrap: Bootstrap resamples for the backtest metrics' CI.
-        confidence_level: Confidence level for that CI, e.g. 0.95 for 95%.
+        confidence_level: Confidence level for that CI and the prediction
+            interval coverage check, e.g. 0.95 for 95%.
         seed: Random seed for the bootstrap, for reproducibility.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
@@ -299,6 +317,134 @@ def diebold_mariano_test(
         model_b_name=model_b_name,
         loss=loss,
         n_lags=n_lags,
+    )
+
+
+@mcp.tool()
+def rolling_origin_backtest(
+    csv_path: str,
+    model_type: str,
+    params: Optional[dict] = None,
+    holdout_size: int = 30,
+    n_origins: int = 5,
+    n_bootstrap: int = 200,
+    seed: int = 42,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Walk-forward (expanding-window) backtest: repeat fit_ets/fit_sarima/
+    fit_gradient_boosted_trees at n_origins different points in the
+    series instead of evaluating against a single fixed holdout window.
+    A single fixed holdout is one arbitrarily-chosen slice -- if it
+    happened to contain an anomaly, or the trend/seasonality lined up
+    unusually well or badly for one model, every metric computed from it
+    (including that call's own bootstrap CI, which only resamples points
+    WITHIN that one window) inherits the bias. This reports the
+    distribution of backtest performance (mean, std, per-origin detail)
+    across multiple non-overlapping origins -- a genuine measure of how
+    STABLE a model's performance is across different stretches of the
+    series, not a single snapshot.
+
+    model_type must be "ets", "sarima", or "gbt" (not "naive" -- the
+    naive baselines don't need walk-forward validation). Each origin
+    refits the model from scratch: this is n_origins times the compute
+    of a single fit_* call, by design.
+
+    Args:
+        csv_path: Path to a CSV with a date column and a value column.
+        model_type: "ets", "sarima", or "gbt".
+        params: Keyword arguments for the matching fit_* function, e.g.
+            for "sarima": {"order": [1,1,1], "seasonal_order": [1,1,1,7]}.
+        holdout_size: Test window size at each origin.
+        n_origins: How many non-overlapping origins to evaluate.
+        n_bootstrap: Bootstrap resamples for each origin's OWN backtest
+            metric CI (kept modest by default since this runs n_origins
+            times; the cross-origin mean/std is the headline measure).
+        seed: Random seed, for reproducibility.
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+    """
+    df = load_series(csv_path, date_col, value_col)
+    return _rolling_origin_backtest(
+        df,
+        model_type=model_type,
+        params=params,
+        holdout_size=holdout_size,
+        n_origins=n_origins,
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+    )
+
+
+@mcp.tool()
+def search_sarima_orders(
+    csv_path: str,
+    holdout_size: int = 30,
+    seasonal_period: int = 7,
+    d: int = 1,
+    seasonal_d: int = 1,
+    max_p: int = 2,
+    max_q: int = 2,
+    max_seasonal_p: int = 1,
+    max_seasonal_q: int = 1,
+    top_n: int = 5,
+    max_combinations: int = 60,
+    n_bootstrap_per_candidate: int = 200,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Advisory grid search over SARIMA (p,q)(P,Q) combinations -- d and
+    seasonal_d are held FIXED (pass them explicitly, informed by
+    ts-analyst's stationarity findings; don't accept the defaults
+    blindly), while p, q, P, Q are searched. Ranked by AICc where
+    available (falling back to AIC), reusing fit_sarima for every
+    candidate.
+
+    THIS IS A SHORTLIST, NOT AN AUTHORITY. Reasoning about model settings
+    from ts-analyst's findings is still your job (see this skill's Step
+    3) -- this tool doesn't replace that. A numerically-best AICc
+    candidate can still have structurally deficient residuals (check
+    residual_diagnostics on whichever candidate you pick, via a direct
+    fit_sarima call), or be a razor-thin winner over the next candidate
+    (consider diebold_mariano_test if the top two are close).
+
+    Bounded by max_combinations (default 60) to avoid runaway compute --
+    each candidate is a full SARIMA fit. Combinations that fail to
+    converge are skipped and counted, not treated as an error.
+
+    Args:
+        csv_path: Path to a CSV with a date column and a value column.
+        holdout_size: Backtest window size for every candidate.
+        seasonal_period: Seasonal cycle length (the `s` in [P,D,Q,s]).
+        d: Non-seasonal differencing order, held fixed across the search.
+        seasonal_d: Seasonal differencing order, held fixed.
+        max_p: Search p in range(0, max_p + 1).
+        max_q: Search q in range(0, max_q + 1).
+        max_seasonal_p: Search P in range(0, max_seasonal_p + 1).
+        max_seasonal_q: Search Q in range(0, max_seasonal_q + 1).
+        top_n: How many top candidates to return in full.
+        max_combinations: Safety cap on grid size; errors instead of
+            running if the requested ranges would exceed it.
+        n_bootstrap_per_candidate: Bootstrap resamples for each
+            candidate's own metric CI (kept modest since this runs many
+            fits).
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+    """
+    df = load_series(csv_path, date_col, value_col)
+    return _search_sarima_orders(
+        df,
+        holdout_size=holdout_size,
+        seasonal_period=seasonal_period,
+        d=d,
+        seasonal_d=seasonal_d,
+        max_p=max_p,
+        max_q=max_q,
+        max_seasonal_p=max_seasonal_p,
+        max_seasonal_q=max_seasonal_q,
+        top_n=top_n,
+        max_combinations=max_combinations,
+        n_bootstrap_per_candidate=n_bootstrap_per_candidate,
     )
 
 
