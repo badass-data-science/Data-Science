@@ -183,7 +183,7 @@ confirmed=True)` and updates the manifest.
 
 If you'd rather not be asked each time for a specific series, opt into
 autonomous mode explicitly -- e.g. as a standing instruction in this
-project's own `CLAUDE.md`, or stated up front in the conversation:
+project's own `AGENTS.md`, or stated up front in the conversation:
 
 > For the `daily_demand.csv` series specifically, you're authorized to
 > redeploy automatically whenever ts-retrain finds a candidate that beats
