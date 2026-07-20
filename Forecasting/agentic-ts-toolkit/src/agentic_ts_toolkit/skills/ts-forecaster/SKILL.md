@@ -74,11 +74,14 @@ and settings you try here -- don't pick blindly.
   Returns a `top_candidates` shortlist, NOT a final answer -- see Step 3
   below for how to actually use this.
 
-All tools take `csv_path`, `holdout_size` (keep this CONSISTENT across
-every call so every model is judged against the same window), and
-optional `date_col`/`value_col`. `fit_*` tools additionally take
-`n_bootstrap`/`confidence_level`/`seed` for their backtest-metric CIs
-(defaults are almost always fine; no need to tune these).
+All tools EXCEPT `diebold_mariano_test` take `csv_path`, `holdout_size`
+(keep this CONSISTENT across every call so every model is judged against
+the same window), and optional `date_col`/`value_col`. `fit_*` tools
+additionally take `n_bootstrap`/`confidence_level`/`seed` for their
+backtest-metric CIs (defaults are almost always fine; no need to tune
+these). `diebold_mariano_test` is the one exception -- it takes
+`actuals`/`predicted_a`/`predicted_b` directly (pulled from two `fit_*`
+results' `holdout_actuals`/`holdout_predicted` fields), not a `csv_path`.
 
 ## Step 1 — Confirm the split
 
