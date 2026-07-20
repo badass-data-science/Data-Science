@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from agentic_ts_toolkit.retrain.retrain_tools import (
+from omen.retrain.retrain_tools import (
     record_deployment,
     load_deployment_manifest,
     compare_candidate_to_deployed,
@@ -138,7 +138,7 @@ def test_execute_redeploy_retrains_and_records_manifest(tmp_path):
     pytest.importorskip("statsmodels")
     pytest.importorskip("sklearn")
 
-    from agentic_ts_toolkit.data_prep import generate_synthetic_series
+    from omen.data_prep import generate_synthetic_series
 
     csv_path = tmp_path / "series.csv"
     generate_synthetic_series(n_days=200).to_csv(csv_path, index=False)

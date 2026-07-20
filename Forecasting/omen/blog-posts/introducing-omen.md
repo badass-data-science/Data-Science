@@ -1,4 +1,4 @@
-# Introducing agentic-ts-toolkit (or, How Our Heroine Built a Forecasting Assembly Line With a Very Suspicious Foreman at the End of It)
+# Introducing Omen (or, How Our Heroine Built a Forecasting Assembly Line With a Very Suspicious Foreman at the End of It)
 
 *Five layers, one Secret Lab™, and a robot that refuses to redeploy anything without being asked twice.*
 
@@ -6,19 +6,19 @@ Our heroine the data scientist has, over the course of her various schemes, accu
 
 Every one of these problems could, in principle, be solved by writing a fresh forecasting script each time: load some data, eyeball a chart, fit whatever model comes to mind first, ship it, forget about it until it's embarrassingly wrong. Our heroine has done this. It works right up until it doesn't, and by then the mojitos have run out.
 
-So instead, she built **agentic-ts-toolkit**: a general-purpose, reusable, five-layer pipeline for exploring a time series, fitting and honestly comparing candidate forecasting models, deploying the winner, watching it in production, and — this is the new part — deciding, on paper, whether it's worth retraining and redeploying when reality drifts. An AI agent drives all five layers. A very small number of the more consequential decisions are, deliberately, *not* left to that agent's judgment at all.
+So instead, she built **Omen**: a general-purpose, reusable, five-layer pipeline for exploring a time series, fitting and honestly comparing candidate forecasting models, deploying the winner, watching it in production, and — this is the new part — deciding, on paper, whether it's worth retraining and redeploying when reality drifts. An AI agent drives all five layers. A very small number of the more consequential decisions are, deliberately, *not* left to that agent's judgment at all.
 
 ## Why Bother?
 
 Off-the-shelf AutoML forecasting tools already exist. They will happily fit forty models, pick the one with the lowest error, and hand it back to you with zero explanation. Our heroine finds this deeply unsatisfying, for the same reason she finds it deeply unsatisfying when the Risk Desk's LLM agent tries to freelance a risk decision: a number without reasoning behind it is not something you can defend later, and "the error was lowest" is not reasoning, it's a coin flip with extra steps.
 
-What she actually wants is an agent that explores a series the way a competent analyst would — checking stationarity, sniffing out seasonality, flagging anomalies — and *then* fits candidates and argues about which one deserves to go into production, citing actual numbers instead of vibes. That's a job for agentic AI, and agentic-ts-toolkit hands an LLM exactly the typed tools it needs to do it properly, via [FastMCP](https://gofastmcp.com) servers and matching [OpenClaw](https://openclaw.dev) skills (playbooks in Markdown telling the agent how to sequence the tools and what to actually report).
+What she actually wants is an agent that explores a series the way a competent analyst would — checking stationarity, sniffing out seasonality, flagging anomalies — and *then* fits candidates and argues about which one deserves to go into production, citing actual numbers instead of vibes. That's a job for agentic AI, and Omen hands an LLM exactly the typed tools it needs to do it properly, via [FastMCP](https://gofastmcp.com) servers and matching [OpenClaw](https://openclaw.dev) skills (playbooks in Markdown telling the agent how to sequence the tools and what to actually report).
 
 But — and this will sound familiar if you read the Risk Desk post — there is a short list of decisions in this pipeline that our heroine does not want re-litigated by an LLM every single time, phrased three subtly different ways depending on its mood: *should this model replace the one currently deployed?* and, even more pointedly, *should anything actually get redeployed right now?* Those get answered by small, boring, deterministic functions instead. More on that below.
 
 ## The Five Layers
 
-agentic-ts-toolkit is organized as five sequential layers, each its own FastMCP server plus companion skill, installable together or separately depending on how much of the pipeline a given project actually needs.
+Omen is organized as five sequential layers, each its own FastMCP server plus companion skill, installable together or separately depending on how much of the pipeline a given project actually needs.
 
 **Layer 1 — `ts-analyst`: look before leaping.** This layer explores a series and recommends an approach, and it deliberately fits nothing. Its tools run an Augmented Dickey-Fuller stationarity test, a seasonal decomposition, ACF/PACF autocorrelation checks, and a rolling z-score anomaly detector, then hand the agent enough evidence to write up findings, a recommended forecasting approach, an alternative it ruled out, and caveats — not a verdict pulled out of thin air.
 
@@ -44,7 +44,7 @@ It's worth noting the whole thing was originally developed and hardened against 
 
 - **Make autonomous-mode authorization inspectable, not just conversational.** Right now, whether autonomous mode applies to a given series lives entirely in the agent's own memory of what it was told. A small opt-in record — which series, since when, by whom — stored next to the deployment manifest would let "is autonomous mode actually on for this series" be answered by reading a file instead of trusting an LLM's recollection of a conversation from three weeks ago.
 - **Add a real CI pipeline and some linting.** The test suite is solid (35 tests, `pytest.importorskip` guards so the core install doesn't drag in `statsmodels`/`scikit-learn` unnecessarily) but nothing runs it automatically yet, and there's no type-checking despite type hints sprinkled throughout.
-- **Actually publish it.** The package layout is PyPI-ready as-is — `pyproject.toml`, console scripts, the works — but the metadata still says `"Your Name" <you@example.com>` and points at `example.com`. Somebody has to pick a real name before someone else claims `agentic-ts-toolkit` first.
+- **Actually publish it.** The package layout is PyPI-ready as-is — `pyproject.toml`, console scripts, the works — but the metadata still says `"Your Name" <you@example.com>`. Somebody has to confirm `omen` is actually free on PyPI before claiming it — it's a short, generic word, so don't assume it isn't already taken.
 
 ## Conclusion
 
@@ -54,7 +54,7 @@ The mojito forecast, for the record, remains bullish.
 
 ## Code
 
-Code is available at [badass-data-science/Data-Science](https://github.com/badass-data-science/Data-Science/tree/agentic-time-series-tools/Forecasting/agentic-ts-toolkit), on the `agentic-time-series-tools` branch.
+Code is available at [badass-data-science/Data-Science](https://github.com/badass-data-science/Data-Science/tree/agentic-time-series-tools/Forecasting/omen), on the `agentic-time-series-tools` branch.
 
 ## AI Use Statement
 

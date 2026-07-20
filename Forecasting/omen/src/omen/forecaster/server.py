@@ -8,14 +8,14 @@ about model quality, not just chase the lowest error number.
 
 Run over stdio (how OpenClaw will launch it), after `pip install -e .`:
     ts-forecaster-server
-    # or: python -m agentic_ts_toolkit.forecaster.server
+    # or: python -m omen.forecaster.server
 """
 
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from agentic_ts_toolkit.data_prep import load_series
+from omen.data_prep import load_series
 from .model_tools import (
     fit_naive_baselines as _fit_naive_baselines,
     fit_ets as _fit_ets,

@@ -4,8 +4,8 @@ import pytest
 pytest.importorskip("statsmodels")
 pytest.importorskip("sklearn")
 
-from agentic_ts_toolkit.data_prep import generate_synthetic_series
-from agentic_ts_toolkit.forecaster.model_tools import (
+from omen.data_prep import generate_synthetic_series
+from omen.forecaster.model_tools import (
     train_test_split,
     fit_naive_baselines,
     fit_ets,

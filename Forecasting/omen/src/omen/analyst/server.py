@@ -7,7 +7,7 @@ them with validated arguments instead of composing shell commands.
 
 Run directly for local testing (after `pip install -e .`):
     ts-analyst-server
-    # or: python -m agentic_ts_toolkit.analyst.server
+    # or: python -m omen.analyst.server
 
 Run over stdio (how OpenClaw / most MCP clients will actually launch it):
     this IS the stdio entrypoint by default — see mcp.run() at the bottom.
@@ -27,7 +27,7 @@ from .analysis_tools import (
     detect_anomalies_robust_zscore as _detect_anomalies_robust_zscore,
     detect_changepoints as _detect_changepoints,
 )
-from agentic_ts_toolkit.data_prep import generate_synthetic_series, load_series
+from omen.data_prep import generate_synthetic_series, load_series
 
 mcp = FastMCP("ts-analyst")
 

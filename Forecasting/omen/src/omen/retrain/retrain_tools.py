@@ -184,7 +184,7 @@ def execute_redeploy(
 ) -> dict:
     """Actually perform a redeploy: retrain `model_type` on the full series
     with `params` (delegating to the matching
-    agentic_ts_toolkit.deploy.forecast_tools function) and record the
+    omen.deploy.forecast_tools function) and record the
     result as the new deployment manifest.
 
     This refuses to do anything unless `confirmed=True` is passed
@@ -203,7 +203,7 @@ def execute_redeploy(
 
     Requires the `deploy` extra installed (statsmodels/scikit-learn)
     regardless of which model_type is used, since it imports
-    agentic_ts_toolkit.deploy.forecast_tools as a whole module.
+    omen.deploy.forecast_tools as a whole module.
     """
     if not confirmed:
         return {
@@ -222,7 +222,7 @@ def execute_redeploy(
         return {"error": f"Unknown model_type '{model_type}'. Must be one of {list(_MODEL_TYPES)}."}
 
     try:
-        from agentic_ts_toolkit.deploy import forecast_tools
+        from omen.deploy import forecast_tools
     except ImportError as exc:
         return {
             "error": (
@@ -231,7 +231,7 @@ def execute_redeploy(
             )
         }
 
-    from agentic_ts_toolkit.data_prep import load_series
+    from omen.data_prep import load_series
 
     df = load_series(csv_path, date_col, value_col)
 

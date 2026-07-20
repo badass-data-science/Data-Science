@@ -4,8 +4,8 @@ import pytest
 
 pytest.importorskip("statsmodels")
 
-from agentic_ts_toolkit.data_prep import generate_synthetic_series
-from agentic_ts_toolkit.analyst.analysis_tools import (
+from omen.data_prep import generate_synthetic_series
+from omen.analyst.analysis_tools import (
     basic_stats,
     check_stationarity,
     seasonal_decomposition_summary,

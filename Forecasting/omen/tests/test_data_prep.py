@@ -1,6 +1,6 @@
 import pandas as pd
 
-from agentic_ts_toolkit.data_prep import generate_synthetic_series, load_series
+from omen.data_prep import generate_synthetic_series, load_series
 
 
 def test_generate_synthetic_series_shape():

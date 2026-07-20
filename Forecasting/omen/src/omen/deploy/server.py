@@ -8,14 +8,14 @@ where the model supports them.
 
 Run over stdio (how OpenClaw will launch it), after `pip install -e .`:
     ts-deploy-server
-    # or: python -m agentic_ts_toolkit.deploy.server
+    # or: python -m omen.deploy.server
 """
 
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from agentic_ts_toolkit.data_prep import load_series
+from omen.data_prep import load_series
 from .forecast_tools import (
     forecast_naive as _forecast_naive,
     forecast_ets as _forecast_ets,

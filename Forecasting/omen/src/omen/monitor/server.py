@@ -8,14 +8,14 @@ retrain recommendation.
 
 Run over stdio (how OpenClaw will launch it), after `pip install -e .`:
     ts-monitor-server
-    # or: python -m agentic_ts_toolkit.monitor.server
+    # or: python -m omen.monitor.server
 """
 
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from agentic_ts_toolkit.data_prep import load_series
+from omen.data_prep import load_series
 from .monitor_tools import (
     compare_forecast_to_actuals as _compare_forecast_to_actuals,
     detect_data_drift as _detect_data_drift,

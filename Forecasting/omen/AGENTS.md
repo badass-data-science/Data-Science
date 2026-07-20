@@ -1,4 +1,4 @@
-# agentic-ts-toolkit
+# Omen
 
 Five layers of agentic time series tooling. Each layer is a FastMCP server
 (typed tools) plus a companion OpenClaw skill (markdown playbook telling an
@@ -14,6 +14,19 @@ nothing is model-specific).
 
 Full architecture/setup is in README.md — don't duplicate it here.
 
+**Project naming**: the project/package/repo directory is `omen` (formerly
+`agentic-ts-toolkit` — renamed, not rebranded from scratch). The five
+layers deliberately KEPT their existing `ts-analyst`/`ts-forecaster`/
+`ts-deploy`/`ts-monitor`/`ts-retrain` server names, skill names, and
+MCP-qualified tool names (e.g. `ts-analyst__basic_stats`) unchanged —
+that's an already-established, separately-branded layer referenced
+everywhere (every `SKILL.md`, every test, every docstring, every blog
+post), and renaming it alongside the project name would have been a much
+larger, more disruptive change than what was asked for. If you're adding
+new tools, keep using the `ts-*` naming convention for them; don't start
+mixing in `omen-*`-prefixed names for consistency with the project name,
+since that would just create two competing conventions.
+
 ## Commands
 
 ```bash
@@ -27,7 +40,7 @@ Per-layer installs: `.[analyst]`, `.[forecaster]`, `.[deploy]`, `.[monitor]`, `.
 
 ## Non-obvious conventions
 
-- **One shared `data_prep.py`** at the package root (`agentic_ts_toolkit.data_prep`). Every subpackage imports it — never re-add a per-layer copy.
+- **One shared `data_prep.py`** at the package root (`omen.data_prep`). Every subpackage imports it — never re-add a per-layer copy.
 - **Within a subpackage, tools return plain functions taking a DataFrame; `server.py` wraps them as `@mcp.tool()` and does the CSV loading.** Keep that split — it's what makes the tool logic unit-testable without spinning up MCP (see `tests/`, which import the tools modules directly, not through `server.py`).
 - **`recommend_retraining` in `monitor_tools.py` is deliberately deterministic/rule-based**, not an LLM judgment call — that's intentional, not a missed opportunity to "let the agent decide." Keep new decision-style tools (accept/reject, threshold-based verdicts) rule-based for the same reason: reproducibility given the same inputs. `retrain_tools.py`'s `compare_candidate_to_deployed` follows the same rule.
 - **Every `SKILL.md` references its tools by their MCP-qualified name** (`ts-analyst__basic_stats`, etc.), not by file path — these are OpenClaw skills, not exec-based scripts. If you add a tool, update the matching `SKILL.md`'s tool list too.
@@ -62,5 +75,5 @@ Per-layer installs: `.[analyst]`, `.[forecaster]`, `.[deploy]`, `.[monitor]`, `.
 
 ## Where things live
 
-- `src/agentic_ts_toolkit/skills/` — the five `SKILL.md` files, bundled as package data via `skills_dir()` in `__init__.py`.
+- `src/omen/skills/` — the five `SKILL.md` files, bundled as package data via `skills_dir()` in `__init__.py`.
 - `openclaw.config.snippet.jsonc` — reference config for wiring all five servers + a model into OpenClaw.

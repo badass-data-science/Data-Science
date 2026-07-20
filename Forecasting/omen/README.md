@@ -1,4 +1,4 @@
-# agentic-ts-toolkit
+# Omen
 
 Five layers of agentic time series tooling, packaged as a normal
 installable Python project. Each layer is a FastMCP server (typed tools)
@@ -28,7 +28,7 @@ package.
 ## Project layout
 
 ```
-agentic-ts-toolkit/
+omen/
 ├── pyproject.toml
 ├── LICENSE
 ├── README.md
@@ -36,7 +36,7 @@ agentic-ts-toolkit/
 ├── .gitignore
 ├── openclaw.config.snippet.jsonc
 ├── src/
-│   └── agentic_ts_toolkit/
+│   └── omen/
 │       ├── __init__.py            # version + skills_dir() helper
 │       ├── data_prep.py           # shared: synthetic data + CSV loader (used by all 5 layers)
 │       ├── analyst/
@@ -73,21 +73,22 @@ agentic-ts-toolkit/
 │   ├── test_monitor_tools.py
 │   └── test_retrain_tools.py
 └── blog-posts/                    # draft write-ups about this project, not part of the package
-    ├── introducing-agentic-ts-toolkit.md
-    └── ts-analyst-gets-a-statistics-degree.md
+    ├── introducing-omen.md
+    ├── ts-analyst-gets-a-statistics-degree.md
+    └── ts-forecaster-shows-its-work.md
 ```
 
 ## What changed from the earlier ad-hoc layout
 
 - **One `data_prep.py`, not four copies.** Every layer previously had its
   own duplicate for self-containment as a standalone MCP server folder;
-  now they all import `agentic_ts_toolkit.data_prep`.
+  now they all import `omen.data_prep`.
 - **Real packaging metadata.** `pyproject.toml` declares dependencies,
   optional extras per layer, and console-script entry points
   (`ts-analyst-server`, `ts-forecaster-server`, `ts-deploy-server`,
   `ts-monitor-server`) so OpenClaw's config can reference an installed
   command instead of an absolute path to a `.py` file.
-- **Skills are bundled package data.** `agentic_ts_toolkit.skills_dir()`
+- **Skills are bundled package data.** `omen.skills_dir()`
   returns the installed path to the four `SKILL.md` files, so you can
   install this package and copy the skills into an OpenClaw workspace
   without needing the original source tree around.
@@ -137,7 +138,7 @@ openclaw mcp tools ts-analyst
 ### 5. Install the bundled skills
 ```bash
 mkdir -p ~/.openclaw/workspace/skills
-cp -r "$(python -c 'import agentic_ts_toolkit as t; print(t.skills_dir())')"/* \
+cp -r "$(python -c 'import omen as t; print(t.skills_dir())')"/* \
     ~/.openclaw/workspace/skills/
 ```
 Start a new OpenClaw session afterward (skills are snapshotted at session
@@ -211,11 +212,12 @@ twine upload --repository testpypi dist/*    # try TestPyPI first
 twine upload dist/*                          # then the real thing
 ```
 Before actually publishing, you'll want to:
-- pick a real package name (check it's free on PyPI first)
-- fill in real author info and a real project URL in `pyproject.toml`
+- confirm `omen` is actually free on PyPI -- it's a short, generic word,
+  so don't assume it isn't already claimed; PyPI names are first-come and
+  effectively permanent once taken
+- fill in real author info in `pyproject.toml` (still says
+  `"Your Name" <you@example.com>`)
 - bump `version` for each release
-- decide whether `agentic-ts-toolkit` is the name you want, since PyPI
-  names are first-come and effectively permanent once claimed
 
 ## Things worth knowing about specific tools (carried over from earlier layers)
 
@@ -410,7 +412,7 @@ Before actually publishing, you'll want to:
   backtest metrics are currently deployed. Nothing else persists between
   calls; every other tool is a pure function of its inputs.
 - **`execute_redeploy` requires the `deploy` extra installed** (it
-  delegates to `agentic_ts_toolkit.deploy.forecast_tools`), regardless of
+  delegates to `omen.deploy.forecast_tools`), regardless of
   which `model_type` is requested, since it imports that module as a
   whole. `ts-retrain`'s diagnostic tools (`load_deployment_manifest`,
   `compare_candidate_to_deployed`, `record_deployment`) have no such

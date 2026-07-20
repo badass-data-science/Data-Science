@@ -48,7 +48,7 @@ Caught before a single line of it reached the actual test suite. The shipped ver
 
 ## Code
 
-Code is available at [badass-data-science/Data-Science](https://github.com/badass-data-science/Data-Science/tree/agentic-time-series-tools/Forecasting/agentic-ts-toolkit), on the `agentic-time-series-tools` branch.
+Code is available at [badass-data-science/Data-Science](https://github.com/badass-data-science/Data-Science/tree/agentic-time-series-tools/Forecasting/omen), on the `agentic-time-series-tools` branch.
 
 ## AI Use Statement
 

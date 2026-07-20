@@ -12,7 +12,7 @@ skills/ts-retrain/SKILL.md for the full workflow.
 
 Run over stdio (how OpenClaw will launch it), after `pip install -e .`:
     ts-retrain-server
-    # or: python -m agentic_ts_toolkit.retrain.server
+    # or: python -m omen.retrain.server
 """
 
 from typing import Optional

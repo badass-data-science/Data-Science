@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentic-ts-toolkit"
+name = "omen"
 version = "0.1.0"
-description = "Agentic time series analysis, backtesting, deployment, and monitoring tools, exposed as FastMCP servers"
+description = "Omen: agentic time series analysis, backtesting, deployment, and monitoring tools, exposed as FastMCP servers"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "Your Name", email = "you@example.com" },
 ]
-keywords = ["time-series", "forecasting", "mcp", "agents", "openclaw", "fastmcp"]
+keywords = ["omen", "time-series", "forecasting", "mcp", "agents", "openclaw", "fastmcp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -41,21 +41,24 @@ all = ["statsmodels>=0.14", "scikit-learn>=1.4", "scipy>=1.11"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
-Homepage = "https://example.com/agentic-ts-toolkit"
-Repository = "https://example.com/agentic-ts-toolkit"
+Homepage = "https://github.com/badass-data-science/Data-Science/tree/agentic-time-series-tools/Forecasting/omen"
+Repository = "https://github.com/badass-data-science/Data-Science"
 
 # Console scripts: after `pip install`, these run each layer's MCP server
 # directly, so OpenClaw (or any MCP client) can point its config at the
-# installed command instead of an absolute path to a .py file.
+# installed command instead of an absolute path to a .py file. Script
+# NAMES stay ts-analyst-server etc. (the five layers' own established
+# branding) even though the package/project itself is now "omen" --
+# see AGENTS.md for why these weren't renamed together.
 [project.scripts]
-ts-analyst-server = "agentic_ts_toolkit.analyst.server:main"
-ts-forecaster-server = "agentic_ts_toolkit.forecaster.server:main"
-ts-deploy-server = "agentic_ts_toolkit.deploy.server:main"
-ts-monitor-server = "agentic_ts_toolkit.monitor.server:main"
-ts-retrain-server = "agentic_ts_toolkit.retrain.server:main"
+ts-analyst-server = "omen.analyst.server:main"
+ts-forecaster-server = "omen.forecaster.server:main"
+ts-deploy-server = "omen.deploy.server:main"
+ts-monitor-server = "omen.monitor.server:main"
+ts-retrain-server = "omen.retrain.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentic_ts_toolkit"]
+packages = ["src/omen"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,5 +1,5 @@
-from agentic_ts_toolkit.data_prep import generate_synthetic_series
-from agentic_ts_toolkit.monitor.monitor_tools import (
+from omen.data_prep import generate_synthetic_series
+from omen.monitor.monitor_tools import (
     compute_metrics,
     compare_forecast_to_actuals,
     detect_data_drift,
