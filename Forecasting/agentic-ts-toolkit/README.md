@@ -10,7 +10,8 @@ package.
   anomalies, structural breaks) and recommend a forecasting approach with
   reasoning.
 - **Layer 2 — `ts-forecaster`**: fit candidate models against a common
-  held-out window, backtest them, and recommend one with reasoning
+  held-out window, backtest them (optionally across multiple rolling
+  origins), compare them statistically, and recommend one with reasoning
   grounded in real error metrics and residual diagnostics.
 - **Layer 3 — `ts-deploy`**: retrain the chosen model on the full series
   and produce a real forecast beyond the end of the data, with prediction
@@ -31,12 +32,13 @@ agentic-ts-toolkit/
 ├── pyproject.toml
 ├── LICENSE
 ├── README.md
+├── AGENTS.md
 ├── .gitignore
 ├── openclaw.config.snippet.jsonc
 ├── src/
 │   └── agentic_ts_toolkit/
 │       ├── __init__.py            # version + skills_dir() helper
-│       ├── data_prep.py           # shared: synthetic data + CSV loader (used by all 4 layers)
+│       ├── data_prep.py           # shared: synthetic data + CSV loader (used by all 5 layers)
 │       ├── analyst/
 │       │   ├── __init__.py
 │       │   ├── analysis_tools.py  # Layer 1 diagnostic functions
@@ -63,13 +65,16 @@ agentic-ts-toolkit/
 │           ├── ts-deploy/SKILL.md
 │           ├── ts-monitor/SKILL.md
 │           └── ts-retrain/SKILL.md
-└── tests/
-    ├── test_data_prep.py
-    ├── test_analyst_tools.py
-    ├── test_forecaster_tools.py
-    ├── test_deploy_tools.py
-    ├── test_monitor_tools.py
-    └── test_retrain_tools.py
+├── tests/
+│   ├── test_data_prep.py
+│   ├── test_analyst_tools.py
+│   ├── test_forecaster_tools.py
+│   ├── test_deploy_tools.py
+│   ├── test_monitor_tools.py
+│   └── test_retrain_tools.py
+└── blog-posts/                    # draft write-ups about this project, not part of the package
+    ├── introducing-agentic-ts-toolkit.md
+    └── ts-analyst-gets-a-statistics-degree.md
 ```
 
 ## What changed from the earlier ad-hoc layout
