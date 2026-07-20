@@ -18,7 +18,11 @@ explore and recommend. Model fitting/backtesting is a separate, later skill.
   write it to CSV. Use this only if the user hasn't given you their own
   data.
 - `ts-analyst__basic_stats` — length, date range, missing values,
-  mean/std/min/max.
+  mean/std/min/max, plus a confidence interval for the mean
+  (`mean_ci_lower`, `mean_ci_upper`, default 95%). Cite the interval when
+  comparing means across series or across cuts of the same series -- a
+  bare mean invites treating small differences as meaningful when the
+  sample size doesn't actually support that.
 - `ts-analyst__check_stationarity` — runs BOTH an Augmented Dickey-Fuller
   test and a KPSS test and combines them into one joint verdict (`ADF and
   KPSS agree: ...` or a specific note about what it means if they
@@ -27,13 +31,20 @@ explore and recommend. Model fitting/backtesting is a separate, later skill.
   KPSS: stationary), so running both and reading them together is
   standard practice, not redundant.
   - `adf_p_value` / `adf_is_likely_stationary` plus a mean-reversion
-    effect size (`mean_reversion_lambda`, `mean_reversion_half_life_periods`):
-    the p-value alone only tells you whether the series is
-    *statistically* stationary; the half-life tells you whether that
-    reversion is fast enough to matter for the horizon you actually
-    care about. A series can clear p < 0.05 with a half-life of 200
-    periods -- technically stationary, practically irrelevant for a
-    30-day forecast.
+    effect size (`mean_reversion_lambda`, `mean_reversion_half_life_periods`)
+    AND its confidence interval (`mean_reversion_lambda_ci_lower/upper`,
+    `mean_reversion_half_life_ci_lower/upper`): the p-value alone only
+    tells you whether the series is *statistically* stationary; the
+    half-life tells you whether that reversion is fast enough to matter
+    for the horizon you actually care about, and the CI tells you how
+    precisely that half-life is actually known -- a point estimate of "4
+    periods" that could plausibly be anywhere from 2 to 40 is a very
+    different finding from one with a tight CI. `half_life_ci_upper` can
+    be `null`, meaning unbounded -- lambda's own CI reaches into
+    non-reverting territory, so the data can't rule out arbitrarily slow
+    reversion at that end. A series can clear p < 0.05 with a half-life
+    of 200 periods -- technically stationary, practically irrelevant for
+    a 30-day forecast.
   - `kpss_p_value` / `kpss_is_likely_stationary` plus `kpss_effect_size`
     (the KPSS statistic as a multiple of its own 5% critical value):
     KPSS's own p-value is clipped at table boundaries (commonly stuck at
@@ -48,11 +59,16 @@ explore and recommend. Model fitting/backtesting is a separate, later skill.
 - `ts-analyst__seasonal_decomposition_summary` — trend/seasonal strength
   (takes `period`, default 7 for weekly seasonality in daily data).
 - `ts-analyst__acf_pacf_summary` — autocorrelation structure (takes
-  `n_lags`). `significant_acf_lags` is a list of `{lag, acf, effect_size}`
-  entries, sorted strongest first (not chronologically) and capped at 10
-  -- `effect_size` is the ACF magnitude as a multiple of the significance
-  threshold, so you can tell a barely-significant lag from one that's 5x
-  the threshold instead of both just reading "significant."
+  `n_lags`). Significance is decided per-lag using statsmodels' Bartlett
+  confidence intervals, NOT a single global threshold -- the correct
+  standard error for ACF grows with lag (it depends on the cumulative
+  autocorrelation of earlier lags), so lag 1 and lag 14 don't share the
+  same bar for "significant." `significant_acf_lags` is a list of
+  `{lag, acf, ci_lower, ci_upper, effect_size}` entries, sorted strongest
+  first (not chronologically) and capped at 10 -- `effect_size` is the
+  ACF magnitude as a multiple of that lag's OWN interval half-width, so
+  you can tell a barely-significant lag from one that's 5x its own
+  threshold instead of both just reading "significant."
 - `ts-analyst__detect_anomalies_zscore` — flags outliers vs. a rolling mean
   (takes `z_threshold`). `anomalies` is a list of `{date, value, z_score}`
   entries, sorted most extreme first (not chronologically) and capped at
@@ -93,6 +109,10 @@ Once you have enough evidence, stop calling tools and write a report with:
     alone -- "p-value 0.02 (stationary), but half-life of 85 periods" is
     a materially different finding from "p-value 0.02, half-life of 4
     periods," even though both clear the same significance threshold.
+    Cite its confidence interval too when it's wide or unbounded -- "half
+    -life ~4 periods (95% CI: 2 to unbounded)" is meaningfully less
+    certain than "half-life ~4 periods (95% CI: 3 to 6)," even though
+    both have the same point estimate.
   - Same principle for anomalies and ACF lags: cite the actual `z_score`
     or `effect_size` for anything you call out, not just that it was
     flagged. "Anomaly on 2024-06-03 with z=11.2" is a very different

@@ -16,30 +16,56 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from scipy.stats import t as _t_dist
+from statsmodels.regression.linear_model import OLS
+from statsmodels.tools.tools import add_constant
 from statsmodels.tsa.stattools import adfuller, acf, kpss, pacf
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 
-def basic_stats(df: pd.DataFrame) -> dict:
-    """Summary stats: length, date range, missing values, basic distribution."""
+def basic_stats(df: pd.DataFrame, confidence_level: float = 0.95) -> dict:
+    """Summary stats: length, date range, missing values, basic distribution.
+
+    Also reports a confidence interval for the mean (Student's t, since
+    sample sizes here can be small enough that the normal approximation
+    isn't a safe substitute) -- a bare mean with no uncertainty band
+    invites reading small differences (across series, or across cuts of
+    the same series) as more meaningful than the sample size supports.
+    """
     values = df["value"]
+    n_non_missing = int(values.count())  # excludes NaNs, unlike len(df)
+    mean = float(values.mean())
+    std = float(values.std())
+
+    mean_ci_lower = mean_ci_upper = None
+    if n_non_missing > 1 and std > 0:
+        standard_error = std / np.sqrt(n_non_missing)
+        t_crit = float(_t_dist.ppf(1 - (1 - confidence_level) / 2, df=n_non_missing - 1))
+        margin = t_crit * standard_error
+        mean_ci_lower = round(mean - margin, 3)
+        mean_ci_upper = round(mean + margin, 3)
+
     return {
         "n_observations": int(len(df)),
         "start_date": str(df["date"].min().date()),
         "end_date": str(df["date"].max().date()),
         "inferred_frequency": pd.infer_freq(df["date"]) or "irregular",
         "n_missing_values": int(values.isna().sum()),
-        "mean": round(float(values.mean()), 3),
-        "std": round(float(values.std()), 3),
+        "mean": round(mean, 3),
+        "mean_ci_lower": mean_ci_lower,
+        "mean_ci_upper": mean_ci_upper,
+        "confidence_level": confidence_level,
+        "std": round(std, 3),
         "min": round(float(values.min()), 3),
         "max": round(float(values.max()), 3),
     }
 
 
-def _mean_reversion_effect_size(values: np.ndarray) -> dict:
+def _mean_reversion_effect_size(values: np.ndarray, confidence_level: float = 0.95) -> dict:
     """Effect size for the ADF test: how strongly, not just whether, the
-    series mean-reverts.
+    series mean-reverts -- plus a confidence interval, since a bare point
+    estimate of lambda/half-life overstates how precisely either is known.
 
     The ADF test itself only answers "is there a unit root," which says
     nothing about magnitude -- a series can be statistically significantly
@@ -47,29 +73,52 @@ def _mean_reversion_effect_size(values: np.ndarray) -> dict:
     short-horizon forecasting, or so quickly the trend/seasonal signal
     barely matters next to it. This fits the classic Ornstein-Uhlenbeck-style
     regression underlying the ADF statistic itself, delta_y_t = lambda *
-    y_{t-1} + mu + epsilon_t, via simple OLS (independent of ADF's own
-    autolag selection, so it stays interpretable on its own), and reports:
+    y_{t-1} + mu + epsilon_t, via OLS (independent of ADF's own autolag
+    selection, so it stays interpretable on its own), and reports:
 
-    - lambda: the mean-reversion speed. Negative means reverting (more
-      negative = faster); zero or positive means no mean reversion at all.
+    - lambda: the mean-reversion speed, with its OLS confidence interval.
+      Negative means reverting (more negative = faster); zero or positive
+      means no mean reversion at all.
     - half_life_periods: periods for half of a deviation from the series'
       long-run mean to decay, i.e. -ln(2)/lambda. None when lambda >= 0,
       since there's no finite half-life to report.
+    - half_life_ci_lower / half_life_ci_upper: half-life is an INCREASING
+      function of lambda on lambda < 0 (a more negative lambda means
+      faster reversion, i.e. a shorter half-life), so the half-life CI's
+      bounds come from lambda's CI bounds in the same order, not swapped:
+      half_life_ci_lower from lambda_ci_lower, half_life_ci_upper from
+      lambda_ci_upper. half_life_ci_upper is None (unbounded) whenever
+      lambda's CI reaches non-negative territory -- the data can't rule
+      out arbitrarily slow reversion at that end of the interval.
     """
     y = np.asarray(values, dtype=float)
     y_lag = y[:-1]
     delta_y = np.diff(y)
-    design = np.column_stack([np.ones_like(y_lag), y_lag])
-    coeffs, *_ = np.linalg.lstsq(design, delta_y, rcond=None)
-    lam = float(coeffs[1])
+    design = add_constant(y_lag)
+    fit = OLS(delta_y, design).fit()
+    lam = float(fit.params[1])
+    lam_ci_lower, lam_ci_upper = (float(v) for v in fit.conf_int(alpha=1 - confidence_level)[1])
 
     half_life = None
+    half_life_ci_lower = None
+    half_life_ci_upper = None
     if lam < 0:
         half_life = round(float(-np.log(2) / lam), 2)
+        # lam_ci_lower <= lam < 0 is guaranteed (the CI contains the point
+        # estimate), so this bound is always computable here.
+        half_life_ci_lower = round(float(-np.log(2) / lam_ci_lower), 2)
+        if lam_ci_upper < 0:
+            half_life_ci_upper = round(float(-np.log(2) / lam_ci_upper), 2)
+        # else: lambda's CI reaches >= 0, so half-life's upper bound is
+        # unbounded -- leave half_life_ci_upper as None.
 
     return {
         "lambda": round(lam, 6),
+        "lambda_ci_lower": round(lam_ci_lower, 6),
+        "lambda_ci_upper": round(lam_ci_upper, 6),
         "half_life_periods": half_life,
+        "half_life_ci_lower": half_life_ci_lower,
+        "half_life_ci_upper": half_life_ci_upper,
     }
 
 
@@ -132,7 +181,7 @@ def _combined_stationarity_interpretation(adf_stationary: bool, kpss_stationary:
     )
 
 
-def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
+def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c", confidence_level: float = 0.95) -> dict:
     """Augmented Dickey-Fuller AND KPSS tests for stationarity, each with
     an effect size, combined into one joint verdict.
 
@@ -146,8 +195,12 @@ def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
 
     Both tests alone only answer "stationary or not" -- neither says how
     strongly. This also reports:
-    - a mean-reversion effect size for ADF (`mean_reversion_lambda`,
-      `mean_reversion_half_life_periods` -- see _mean_reversion_effect_size)
+    - a mean-reversion effect size AND confidence interval for ADF
+      (`mean_reversion_lambda`, `mean_reversion_half_life_periods`, and
+      their `_ci_lower`/`_ci_upper` bounds -- see
+      _mean_reversion_effect_size). The half-life point estimate alone
+      overstates precision; the CI shows how wide a range is actually
+      consistent with the data.
     - an effect size for KPSS (`kpss_effect_size` -- see
       _kpss_effect_size), which stays informative even when KPSS's own
       p-value is clipped at a lookup-table boundary.
@@ -156,23 +209,32 @@ def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
         kpss_regression: "c" (default, stationary around a constant --
             the same implicit null ADF is tested against here) or "ct"
             (stationary around a deterministic trend).
+        confidence_level: Confidence level for the mean-reversion
+            lambda/half-life interval, e.g. 0.95 for 95%.
     """
     series = df["value"].dropna()
 
     adf_result = adfuller(series, autolag="AIC")
     adf_stat, adf_p_value = adf_result[0], adf_result[1]
     adf_stationary = bool(adf_p_value < 0.05)
-    reversion = _mean_reversion_effect_size(series.values)
+    reversion = _mean_reversion_effect_size(series.values, confidence_level=confidence_level)
 
     kpss_result = _kpss_effect_size(series, regression=kpss_regression)
     kpss_stationary = bool(kpss_result["p_value"] >= 0.05)
 
-    reversion_note = (
-        f"Mean-reversion half-life is ~{reversion['half_life_periods']} periods "
-        "(small = corrects quickly, large = slow even if statistically detectable)."
-        if reversion["half_life_periods"] is not None
-        else "No finite mean-reversion half-life (lambda >= 0 in the ADF regression)."
-    )
+    if reversion["half_life_periods"] is not None:
+        upper_note = (
+            f"{reversion['half_life_ci_upper']}"
+            if reversion["half_life_ci_upper"] is not None
+            else "unbounded (CI for lambda includes non-reverting values)"
+        )
+        reversion_note = (
+            f"Mean-reversion half-life is ~{reversion['half_life_periods']} periods "
+            f"({int(confidence_level * 100)}% CI: {reversion['half_life_ci_lower']} to {upper_note}) "
+            "-- small values correct quickly, large ones are slow even if statistically detectable."
+        )
+    else:
+        reversion_note = "No finite mean-reversion half-life (lambda >= 0 in the ADF regression)."
     kpss_effect_note = (
         f"KPSS statistic is {kpss_result['effect_size']}x its 5% critical value"
         + (" (comfortably below it)." if kpss_result["effect_size"] < 1 else " (exceeds it).")
@@ -183,7 +245,11 @@ def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
         "adf_p_value": round(float(adf_p_value), 4),
         "adf_is_likely_stationary": adf_stationary,
         "mean_reversion_lambda": reversion["lambda"],
+        "mean_reversion_lambda_ci_lower": reversion["lambda_ci_lower"],
+        "mean_reversion_lambda_ci_upper": reversion["lambda_ci_upper"],
         "mean_reversion_half_life_periods": reversion["half_life_periods"],
+        "mean_reversion_half_life_ci_lower": reversion["half_life_ci_lower"],
+        "mean_reversion_half_life_ci_upper": reversion["half_life_ci_upper"],
         "kpss_statistic": kpss_result["statistic"],
         "kpss_p_value": kpss_result["p_value"],
         "kpss_lags": kpss_result["lags"],
@@ -191,6 +257,7 @@ def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
         "kpss_effect_size": kpss_result["effect_size"],
         "kpss_regression": kpss_regression,
         "kpss_is_likely_stationary": kpss_stationary,
+        "confidence_level": confidence_level,
         "interpretation": (
             _combined_stationarity_interpretation(adf_stationary, kpss_stationary)
             + " "
@@ -239,40 +306,52 @@ def seasonal_decomposition_summary(df: pd.DataFrame, period: int = 7) -> dict:
     }
 
 
-def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21) -> dict:
+def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21, alpha: float = 0.05) -> dict:
     """Autocorrelation / partial autocorrelation at selected lags. Useful for
     spotting seasonality period and deciding AR/MA order.
 
-    Flags lags whose ACF magnitude exceeds a rough significance threshold
-    (1.96/sqrt(n)) and reports an effect size for each -- the ACF value's
-    magnitude as a multiple of that threshold. A lag that barely clears the
-    threshold and one that clears it by 5x are both just "significant"
-    without this; the effect size is what tells them apart.
+    Flags lags whose confidence interval excludes zero, using statsmodels'
+    Bartlett-formula per-lag confidence intervals -- NOT a single global
+    threshold. The correct standard error for ACF at lag k grows with the
+    cumulative squared autocorrelation of lags 1..k-1 (as if the series
+    were an MA(k-1)); a uniform 1.96/sqrt(n) threshold, as an earlier
+    version of this tool used, is only actually correct at lag 1 and
+    understates the threshold at later lags. Each flagged lag reports an
+    effect size -- the ACF magnitude as a multiple of its own (per-lag)
+    interval half-width -- so a lag that barely clears its threshold and
+    one that clears it by 5x aren't both just "significant."
+
+    Args:
+        alpha: Significance level for the per-lag confidence intervals,
+            e.g. 0.05 for 95% intervals.
     """
     series = df["value"].dropna()
     n_lags = min(n_lags, len(series) // 2 - 1)
 
-    acf_vals = acf(series, nlags=n_lags, fft=True)
+    acf_vals, acf_confint = acf(series, nlags=n_lags, fft=True, alpha=alpha)
     pacf_vals = pacf(series, nlags=n_lags)
 
-    # Flag lags with notably high autocorrelation (rough heuristic threshold)
-    threshold = 1.96 / np.sqrt(len(series))
-    significant_acf_lags = [
-        {
-            "lag": i,
-            "acf": round(float(acf_vals[i]), 4),
-            "effect_size": round(abs(float(acf_vals[i])) / threshold, 4),
-        }
-        for i in range(1, len(acf_vals))
-        if abs(acf_vals[i]) > threshold
-    ]
+    significant_acf_lags = []
+    for i in range(1, len(acf_vals)):
+        ci_lower, ci_upper = acf_confint[i]
+        half_width = float(ci_upper - ci_lower) / 2.0
+        if half_width > 0 and abs(acf_vals[i]) > half_width:
+            significant_acf_lags.append(
+                {
+                    "lag": i,
+                    "acf": round(float(acf_vals[i]), 4),
+                    "ci_lower": round(float(ci_lower), 4),
+                    "ci_upper": round(float(ci_upper), 4),
+                    "effect_size": round(abs(float(acf_vals[i])) / half_width, 4),
+                }
+            )
     # Strongest first, so capping for brevity below keeps the most
     # significant lags rather than just the earliest ones chronologically.
     significant_acf_lags.sort(key=lambda entry: entry["effect_size"], reverse=True)
 
     return {
         "n_lags_checked": n_lags,
-        "significance_threshold": round(float(threshold), 4),
+        "significance_alpha": alpha,
         "significant_acf_lags": significant_acf_lags[:10],  # cap for brevity, strongest first
         "acf_at_lag_1": round(float(acf_vals[1]), 4) if len(acf_vals) > 1 else None,
         "acf_at_lag_7": round(float(acf_vals[7]), 4) if len(acf_vals) > 7 else None,

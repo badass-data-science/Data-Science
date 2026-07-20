@@ -214,16 +214,23 @@ Before actually publishing, you'll want to:
 ## Things worth knowing about specific tools (carried over from earlier layers)
 
 - **`ts-analyst__check_stationarity` runs both ADF and KPSS and combines
-  them into one joint verdict, each with its own effect size.** ADF's
-  null is a unit root; KPSS's null is stationarity -- opposite nulls, so
-  running both and reading `interpretation`'s four-way readout (agree
-  stationary / agree non-stationary / disagree in either direction) is
-  standard practice, not redundant. `adf_p_value`/`adf_is_likely_stationary`
-  come with a mean-reversion effect size (`mean_reversion_lambda`,
-  `mean_reversion_half_life_periods`) -- a series can clear `p < 0.05`
-  while reverting so slowly the half-life is impractically long for a
-  short-horizon forecast, so check both, not just the p-value. Don't read
-  a small positive (or slightly negative-but-near-zero)
+  them into one joint verdict, each with its own effect size AND
+  confidence interval.** ADF's null is a unit root; KPSS's null is
+  stationarity -- opposite nulls, so running both and reading
+  `interpretation`'s four-way readout (agree stationary / agree
+  non-stationary / disagree in either direction) is standard practice,
+  not redundant. `adf_p_value`/`adf_is_likely_stationary` come with a
+  mean-reversion effect size (`mean_reversion_lambda`,
+  `mean_reversion_half_life_periods`) and its confidence interval
+  (`mean_reversion_lambda_ci_lower/upper`,
+  `mean_reversion_half_life_ci_lower/upper`) -- a series can clear
+  `p < 0.05` while reverting so slowly the half-life is impractically
+  long for a short-horizon forecast, so check both, not just the
+  p-value; the CI additionally shows how precisely that half-life is
+  actually known. `mean_reversion_half_life_ci_upper` is `null`
+  (unbounded) whenever lambda's own CI reaches non-negative territory --
+  the data can't rule out arbitrarily slow reversion at that end. Don't
+  read a small positive (or slightly negative-but-near-zero)
   `mean_reversion_lambda` as proof of "no reversion" on its own -- under a
   true unit root, this OLS estimate is known to skew slightly negative in
   finite samples; `adf_is_likely_stationary` and the half-life's magnitude
@@ -235,17 +242,33 @@ Before actually publishing, you'll want to:
   pinned at 0.01 or 0.10. Note the field names changed from the tool's
   original single-test version (`p_value`/`is_likely_stationary` are now
   `adf_p_value`/`adf_is_likely_stationary`).
+- **`ts-analyst__basic_stats` reports a confidence interval for the mean**
+  (`mean_ci_lower`, `mean_ci_upper`, Student's t, default 95% via
+  `confidence_level`) -- both are `null` for a constant series (zero
+  variance, no interval to report).
 - **`ts-analyst__acf_pacf_summary` and `ts-analyst__detect_anomalies_zscore`
   both report an effect size for anything they flag, not just a bare
-  pass/fail.** `acf_pacf_summary`'s `significant_acf_lags` is a list of
-  `{lag, acf, effect_size}` entries (`effect_size` = ACF magnitude as a
-  multiple of the significance threshold), sorted strongest first and
-  capped at 10. `detect_anomalies_zscore`'s `anomalies` is a list of
+  pass/fail.** `acf_pacf_summary` now uses statsmodels' Bartlett-formula
+  PER-LAG confidence intervals to decide significance, not a single
+  global threshold -- the correct standard error for ACF grows with lag
+  (it depends on the cumulative autocorrelation of earlier lags), so a
+  uniform `1.96/sqrt(n)` threshold (an earlier version of this tool) is
+  only actually correct at lag 1 and understates the true threshold at
+  later lags. `significant_acf_lags` is a list of
+  `{lag, acf, ci_lower, ci_upper, effect_size}` entries (`effect_size` =
+  ACF magnitude as a multiple of that lag's OWN interval half-width),
+  sorted strongest first and capped at 10 -- on the project's synthetic
+  data, this correctly ranks lag 1 as the single strongest entry (its
+  Bartlett SE is the tightest, with no prior lags inflating it), where
+  the old uniform-threshold version incorrectly ranked lag 7 first.
+  `detect_anomalies_zscore`'s `anomalies` is a list of
   `{date, value, z_score}` entries, sorted most extreme first and capped
   at 15, plus a `max_abs_z_score` summary. Both fields changed shape from
   earlier versions -- `significant_acf_lags` was a bare list of lag
-  integers, and `detect_anomalies_zscore` returned `anomaly_dates`
-  (date strings only, no magnitude) instead of `anomalies`.
+  integers (with a single `significance_threshold`, now
+  `significance_alpha`), and `detect_anomalies_zscore` returned
+  `anomaly_dates` (date strings only, no magnitude) instead of
+  `anomalies`.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.

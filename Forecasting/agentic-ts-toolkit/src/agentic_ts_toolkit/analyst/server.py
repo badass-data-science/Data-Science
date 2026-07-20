@@ -51,23 +51,34 @@ def generate_synthetic_data(out_path: str = "/tmp/ts_data.csv", n_days: int = 73
 
 
 @mcp.tool()
-def basic_stats(csv_path: str, date_col: str = "date", value_col: str = "value") -> dict:
+def basic_stats(
+    csv_path: str,
+    confidence_level: float = 0.95,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
     """Get summary statistics for a time series CSV: length, date range,
-    missing values, and mean/std/min/max of the value column.
+    missing values, and mean/std/min/max of the value column. Also returns
+    a confidence interval for the mean (mean_ci_lower, mean_ci_upper, via
+    Student's t) -- a bare mean invites reading small differences as more
+    meaningful than the sample size actually supports.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
+        confidence_level: Confidence level for the mean's interval, e.g.
+            0.95 for 95%.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
     """
     df = load_series(csv_path, date_col, value_col)
-    return _basic_stats(df)
+    return _basic_stats(df, confidence_level=confidence_level)
 
 
 @mcp.tool()
 def check_stationarity(
     csv_path: str,
     kpss_regression: str = "c",
+    confidence_level: float = 0.95,
     date_col: str = "date",
     value_col: str = "value",
 ) -> dict:
@@ -79,9 +90,14 @@ def check_stationarity(
 
     Also returns two effect sizes, since neither test's p-value alone
     says how strongly (not just whether) the series behaves that way:
-    - mean_reversion_lambda / mean_reversion_half_life_periods (ADF-based):
-      a series can be statistically stationary yet revert so slowly the
-      half-life is impractically long for short-horizon forecasting.
+    - mean_reversion_lambda / mean_reversion_half_life_periods (ADF-based),
+      each with a confidence interval (mean_reversion_lambda_ci_lower/
+      _upper, mean_reversion_half_life_ci_lower/_upper): a series can be
+      statistically stationary yet revert so slowly the half-life is
+      impractically long for short-horizon forecasting, and the point
+      estimate alone overstates how precisely that half-life is known.
+      half_life_ci_upper is null when the interval is unbounded (lambda's
+      own CI reaches non-reverting territory).
     - kpss_effect_size (KPSS statistic / its 5% critical value): stays
       informative even when KPSS's own p-value is clipped at a
       lookup-table boundary (a real limitation of that test in practice).
@@ -91,11 +107,13 @@ def check_stationarity(
         kpss_regression: "c" (default, stationary around a constant) or
             "ct" (stationary around a deterministic trend). Use "ct" if
             ADF and KPSS disagree in a way that suggests trend-stationarity.
+        confidence_level: Confidence level for the mean-reversion
+            lambda/half-life interval, e.g. 0.95 for 95%.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
     """
     df = load_series(csv_path, date_col, value_col)
-    return _check_stationarity(df, kpss_regression=kpss_regression)
+    return _check_stationarity(df, kpss_regression=kpss_regression, confidence_level=confidence_level)
 
 
 @mcp.tool()
@@ -124,25 +142,32 @@ def seasonal_decomposition_summary(
 def acf_pacf_summary(
     csv_path: str,
     n_lags: int = 21,
+    alpha: float = 0.05,
     date_col: str = "date",
     value_col: str = "value",
 ) -> dict:
     """Get autocorrelation and partial autocorrelation values, and which
-    lags are statistically significant. Useful for identifying seasonality
-    period and candidate AR/MA order. Each significant lag in
-    significant_acf_lags includes an effect_size (the ACF magnitude as a
-    multiple of the significance threshold), sorted strongest first, since
-    "significant" alone doesn't distinguish a barely-significant lag from
-    one that's 5x the threshold.
+    lags are statistically significant, using PER-LAG confidence intervals
+    (statsmodels' Bartlett formula) rather than a single global threshold
+    -- the correct standard error for ACF grows with lag, since it depends
+    on the cumulative autocorrelation of earlier lags. Useful for
+    identifying seasonality period and candidate AR/MA order. Each
+    significant lag in significant_acf_lags includes its own confidence
+    interval (ci_lower, ci_upper) and an effect_size (the ACF magnitude as
+    a multiple of its own interval half-width), sorted strongest first,
+    since "significant" alone doesn't distinguish a barely-significant lag
+    from one that's 5x its own threshold.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
         n_lags: Number of lags to check.
+        alpha: Significance level for the per-lag confidence intervals,
+            e.g. 0.05 for 95% intervals.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
     """
     df = load_series(csv_path, date_col, value_col)
-    return _acf_pacf_summary(df, n_lags=n_lags)
+    return _acf_pacf_summary(df, n_lags=n_lags, alpha=alpha)
 
 
 @mcp.tool()

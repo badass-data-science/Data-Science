@@ -25,13 +25,39 @@ def test_basic_stats(sample_df):
     assert result["n_missing_values"] == 0
 
 
+def test_basic_stats_mean_ci_brackets_the_mean(sample_df):
+    result = basic_stats(sample_df)
+    assert result["mean_ci_lower"] < result["mean"] < result["mean_ci_upper"]
+    assert result["confidence_level"] == 0.95
+
+
+def test_basic_stats_mean_ci_widens_with_lower_confidence_level(sample_df):
+    narrow = basic_stats(sample_df, confidence_level=0.80)
+    wide = basic_stats(sample_df, confidence_level=0.99)
+    narrow_width = narrow["mean_ci_upper"] - narrow["mean_ci_lower"]
+    wide_width = wide["mean_ci_upper"] - wide["mean_ci_lower"]
+    assert wide_width > narrow_width
+
+
+def test_basic_stats_mean_ci_is_none_for_constant_series():
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=10, freq="D"), "value": [5.0] * 10})
+    result = basic_stats(df)
+    assert result["std"] == 0
+    assert result["mean_ci_lower"] is None
+    assert result["mean_ci_upper"] is None
+
+
 def test_check_stationarity_returns_expected_keys(sample_df):
     result = check_stationarity(sample_df)
     assert "adf_statistic" in result
     assert "adf_p_value" in result
     assert isinstance(result["adf_is_likely_stationary"], bool)
     assert "mean_reversion_lambda" in result
+    assert "mean_reversion_lambda_ci_lower" in result
+    assert "mean_reversion_lambda_ci_upper" in result
     assert "mean_reversion_half_life_periods" in result
+    assert "mean_reversion_half_life_ci_lower" in result
+    assert "mean_reversion_half_life_ci_upper" in result
     assert "kpss_statistic" in result
     assert "kpss_p_value" in result
     assert isinstance(result["kpss_is_likely_stationary"], bool)
@@ -59,6 +85,23 @@ def test_check_stationarity_reports_finite_half_life_for_mean_reverting_series()
     assert result["mean_reversion_half_life_periods"] is not None
     assert result["mean_reversion_half_life_periods"] > 0
 
+    # lambda's CI should bracket its own point estimate.
+    assert result["mean_reversion_lambda_ci_lower"] <= result["mean_reversion_lambda"]
+    assert result["mean_reversion_lambda"] <= result["mean_reversion_lambda_ci_upper"]
+
+    # Strong, clearly-mean-reverting AR(1) data: the whole lambda CI should
+    # be negative, so half-life's upper bound should be finite (not None).
+    assert result["mean_reversion_lambda_ci_upper"] < 0
+    assert result["mean_reversion_half_life_ci_lower"] is not None
+    assert result["mean_reversion_half_life_ci_upper"] is not None
+    # half-life is an INCREASING function of lambda (more negative = faster
+    # reversion = shorter half-life), so lower <= point estimate <= upper.
+    assert (
+        result["mean_reversion_half_life_ci_lower"]
+        <= result["mean_reversion_half_life_periods"]
+        <= result["mean_reversion_half_life_ci_upper"]
+    )
+
 
 def test_check_stationarity_reports_weak_reversion_for_a_pure_random_walk():
     n = 500
@@ -75,6 +118,18 @@ def test_check_stationarity_reports_weak_reversion_for_a_pure_random_walk():
         result["mean_reversion_half_life_periods"] is None
         or result["mean_reversion_half_life_periods"] > n / 2
     )
+
+
+def test_check_stationarity_half_life_ci_upper_is_unbounded_when_lambda_ci_crosses_zero():
+    result = check_stationarity(_random_walk_df())
+    # On this random walk, lambda's point estimate is (weakly) negative but
+    # its CI reaches into non-negative territory -- the data can't rule out
+    # arbitrarily slow reversion, so half-life's upper bound must be None
+    # (unbounded), not some large-but-finite number.
+    assert result["mean_reversion_lambda_ci_upper"] >= 0
+    assert result["mean_reversion_half_life_ci_upper"] is None
+    assert result["mean_reversion_half_life_ci_lower"] is not None
+    assert "unbounded" in result["interpretation"]
 
 
 def test_check_stationarity_kpss_agrees_with_adf_on_mean_reverting_series():
@@ -121,29 +176,35 @@ def test_seasonal_decomposition_summary(sample_df):
 def test_acf_pacf_summary(sample_df):
     result = acf_pacf_summary(sample_df, n_lags=14)
     assert result["n_lags_checked"] == 14
+    assert result["significance_alpha"] == 0.05
 
 
-def test_acf_pacf_summary_significant_lags_have_effect_size_sorted_strongest_first():
+def test_acf_pacf_summary_significant_lags_have_per_lag_ci_and_effect_size_sorted_strongest_first():
     df = generate_synthetic_series(n_days=300)  # strong weekly seasonality vs. noise
     result = acf_pacf_summary(df, n_lags=21)
 
     lags = result["significant_acf_lags"]
     assert len(lags) > 0
     for entry in lags:
-        assert set(entry) == {"lag", "acf", "effect_size"}
-        # Recomputed from the already-rounded acf/threshold as a sanity check
-        # only -- the code itself rounds effect_size once from full-precision
+        assert set(entry) == {"lag", "acf", "ci_lower", "ci_upper", "effect_size"}
+        half_width = (entry["ci_upper"] - entry["ci_lower"]) / 2.0
+        # Recomputed from already-rounded fields as a sanity check only --
+        # the code itself computes effect_size once from full-precision
         # inputs, so this can differ in the last digit from double-rounding.
-        assert entry["effect_size"] == pytest.approx(
-            abs(entry["acf"]) / result["significance_threshold"], abs=1e-2
-        )
+        assert entry["effect_size"] == pytest.approx(abs(entry["acf"]) / half_width, abs=1e-2)
         assert entry["effect_size"] > 1  # by definition of "significant" here
+        # 0 must fall outside the CI for a flagged (significant) lag.
+        assert not (entry["ci_lower"] <= 0 <= entry["ci_upper"])
 
     effect_sizes = [entry["effect_size"] for entry in lags]
     assert effect_sizes == sorted(effect_sizes, reverse=True)
 
-    # Weekly seasonality (period 7) should be the single strongest lag.
-    assert lags[0]["lag"] == 7
+    # Lag 1's Bartlett standard error is the tightest of any lag (no prior
+    # lags inflate its variance), so on data with strong short-lag
+    # autocorrelation, lag 1 should be the single strongest entry -- this
+    # is also the concrete case where the OLD uniform 1.96/sqrt(n)
+    # threshold gave a different (wrong) answer, ranking lag 7 first.
+    assert lags[0]["lag"] == 1
 
 
 def test_detect_anomalies_zscore(sample_df):

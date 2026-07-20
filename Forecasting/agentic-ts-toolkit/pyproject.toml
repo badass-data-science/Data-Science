@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-analyst = ["statsmodels>=0.14"]
+analyst = ["statsmodels>=0.14", "scipy>=1.11"]
 forecaster = ["statsmodels>=0.14", "scikit-learn>=1.4"]
 deploy = ["statsmodels>=0.14", "scikit-learn>=1.4"]
 monitor = ["scipy>=1.11"]
