@@ -48,9 +48,17 @@ explore and recommend. Model fitting/backtesting is a separate, later skill.
 - `ts-analyst__seasonal_decomposition_summary` — trend/seasonal strength
   (takes `period`, default 7 for weekly seasonality in daily data).
 - `ts-analyst__acf_pacf_summary` — autocorrelation structure (takes
-  `n_lags`).
+  `n_lags`). `significant_acf_lags` is a list of `{lag, acf, effect_size}`
+  entries, sorted strongest first (not chronologically) and capped at 10
+  -- `effect_size` is the ACF magnitude as a multiple of the significance
+  threshold, so you can tell a barely-significant lag from one that's 5x
+  the threshold instead of both just reading "significant."
 - `ts-analyst__detect_anomalies_zscore` — flags outliers vs. a rolling mean
-  (takes `z_threshold`).
+  (takes `z_threshold`). `anomalies` is a list of `{date, value, z_score}`
+  entries, sorted most extreme first (not chronologically) and capped at
+  15 -- report the actual `z_score` for anything you cite, not just that
+  it crossed the threshold; `max_abs_z_score` is a quick single-number
+  summary of the worst anomaly found.
 
 All tools except `generate_synthetic_data` take a `csv_path` argument
 (plus optional `date_col`/`value_col` if your columns aren't named
@@ -85,6 +93,10 @@ Once you have enough evidence, stop calling tools and write a report with:
     alone -- "p-value 0.02 (stationary), but half-life of 85 periods" is
     a materially different finding from "p-value 0.02, half-life of 4
     periods," even though both clear the same significance threshold.
+  - Same principle for anomalies and ACF lags: cite the actual `z_score`
+    or `effect_size` for anything you call out, not just that it was
+    flagged. "Anomaly on 2024-06-03 with z=11.2" is a very different
+    finding from "z=3.1," and both would otherwise just say "flagged."
 - **Recommended approach**: one forecasting approach (e.g. SARIMA,
   ETS/Holt-Winters, Prophet-style decomposition, gradient-boosted trees with
   lag/calendar features, or a simple neural sequence model), with clear

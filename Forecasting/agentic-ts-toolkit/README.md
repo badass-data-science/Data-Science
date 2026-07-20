@@ -235,6 +235,17 @@ Before actually publishing, you'll want to:
   pinned at 0.01 or 0.10. Note the field names changed from the tool's
   original single-test version (`p_value`/`is_likely_stationary` are now
   `adf_p_value`/`adf_is_likely_stationary`).
+- **`ts-analyst__acf_pacf_summary` and `ts-analyst__detect_anomalies_zscore`
+  both report an effect size for anything they flag, not just a bare
+  pass/fail.** `acf_pacf_summary`'s `significant_acf_lags` is a list of
+  `{lag, acf, effect_size}` entries (`effect_size` = ACF magnitude as a
+  multiple of the significance threshold), sorted strongest first and
+  capped at 10. `detect_anomalies_zscore`'s `anomalies` is a list of
+  `{date, value, z_score}` entries, sorted most extreme first and capped
+  at 15, plus a `max_abs_z_score` summary. Both fields changed shape from
+  earlier versions -- `significant_acf_lags` was a bare list of lag
+  integers, and `detect_anomalies_zscore` returned `anomaly_dates`
+  (date strings only, no magnitude) instead of `anomalies`.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.

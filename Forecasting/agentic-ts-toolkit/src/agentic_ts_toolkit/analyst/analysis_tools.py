@@ -242,6 +242,12 @@ def seasonal_decomposition_summary(df: pd.DataFrame, period: int = 7) -> dict:
 def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21) -> dict:
     """Autocorrelation / partial autocorrelation at selected lags. Useful for
     spotting seasonality period and deciding AR/MA order.
+
+    Flags lags whose ACF magnitude exceeds a rough significance threshold
+    (1.96/sqrt(n)) and reports an effect size for each -- the ACF value's
+    magnitude as a multiple of that threshold. A lag that barely clears the
+    threshold and one that clears it by 5x are both just "significant"
+    without this; the effect size is what tells them apart.
     """
     series = df["value"].dropna()
     n_lags = min(n_lags, len(series) // 2 - 1)
@@ -251,12 +257,23 @@ def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21) -> dict:
 
     # Flag lags with notably high autocorrelation (rough heuristic threshold)
     threshold = 1.96 / np.sqrt(len(series))
-    significant_acf_lags = [i for i in range(1, len(acf_vals)) if abs(acf_vals[i]) > threshold]
+    significant_acf_lags = [
+        {
+            "lag": i,
+            "acf": round(float(acf_vals[i]), 4),
+            "effect_size": round(abs(float(acf_vals[i])) / threshold, 4),
+        }
+        for i in range(1, len(acf_vals))
+        if abs(acf_vals[i]) > threshold
+    ]
+    # Strongest first, so capping for brevity below keeps the most
+    # significant lags rather than just the earliest ones chronologically.
+    significant_acf_lags.sort(key=lambda entry: entry["effect_size"], reverse=True)
 
     return {
         "n_lags_checked": n_lags,
         "significance_threshold": round(float(threshold), 4),
-        "significant_acf_lags": significant_acf_lags[:10],  # cap for brevity
+        "significant_acf_lags": significant_acf_lags[:10],  # cap for brevity, strongest first
         "acf_at_lag_1": round(float(acf_vals[1]), 4) if len(acf_vals) > 1 else None,
         "acf_at_lag_7": round(float(acf_vals[7]), 4) if len(acf_vals) > 7 else None,
         "pacf_at_lag_1": round(float(pacf_vals[1]), 4) if len(pacf_vals) > 1 else None,
@@ -266,18 +283,39 @@ def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21) -> dict:
 def detect_anomalies_zscore(df: pd.DataFrame, z_threshold: float = 3.0) -> dict:
     """Flag points whose value is more than z_threshold standard deviations
     from a rolling mean, i.e. simple anomaly/outlier detection.
+
+    Reports each flagged point's actual z-score as an effect size -- not
+    just that it crossed z_threshold, but by how much. A z-score of 3.1 and
+    a z-score of 11 both clear a threshold of 3.0, but they're very
+    different findings; the threshold alone can't tell them apart.
     """
     series = df["value"]
     rolling_mean = series.rolling(window=14, min_periods=1, center=True).mean()
     rolling_std = series.rolling(window=14, min_periods=1, center=True).std().replace(0, np.nan)
 
     z_scores = (series - rolling_mean) / rolling_std
-    flagged = df.loc[z_scores.abs() > z_threshold, ["date", "value"]]
+    flagged_mask = z_scores.abs() > z_threshold
+    flagged = df.loc[flagged_mask, ["date", "value"]].copy()
+    flagged["z_score"] = z_scores.loc[flagged_mask]
+
+    # Most extreme first, so capping for brevity below keeps the biggest
+    # anomalies rather than just the earliest ones chronologically.
+    flagged = flagged.reindex(flagged["z_score"].abs().sort_values(ascending=False).index)
+
+    anomalies = [
+        {
+            "date": str(row["date"].date()),
+            "value": round(float(row["value"]), 3),
+            "z_score": round(float(row["z_score"]), 3),
+        }
+        for _, row in flagged.iterrows()
+    ]
 
     return {
         "z_threshold": z_threshold,
         "n_anomalies_flagged": int(len(flagged)),
-        "anomaly_dates": [str(d.date()) for d in flagged["date"]][:15],  # cap for brevity
+        "max_abs_z_score": round(float(flagged["z_score"].abs().max()), 3) if len(flagged) else None,
+        "anomalies": anomalies[:15],  # cap for brevity, most extreme first
     }
 
 

@@ -123,6 +123,56 @@ def test_acf_pacf_summary(sample_df):
     assert result["n_lags_checked"] == 14
 
 
+def test_acf_pacf_summary_significant_lags_have_effect_size_sorted_strongest_first():
+    df = generate_synthetic_series(n_days=300)  # strong weekly seasonality vs. noise
+    result = acf_pacf_summary(df, n_lags=21)
+
+    lags = result["significant_acf_lags"]
+    assert len(lags) > 0
+    for entry in lags:
+        assert set(entry) == {"lag", "acf", "effect_size"}
+        # Recomputed from the already-rounded acf/threshold as a sanity check
+        # only -- the code itself rounds effect_size once from full-precision
+        # inputs, so this can differ in the last digit from double-rounding.
+        assert entry["effect_size"] == pytest.approx(
+            abs(entry["acf"]) / result["significance_threshold"], abs=1e-2
+        )
+        assert entry["effect_size"] > 1  # by definition of "significant" here
+
+    effect_sizes = [entry["effect_size"] for entry in lags]
+    assert effect_sizes == sorted(effect_sizes, reverse=True)
+
+    # Weekly seasonality (period 7) should be the single strongest lag.
+    assert lags[0]["lag"] == 7
+
+
 def test_detect_anomalies_zscore(sample_df):
     result = detect_anomalies_zscore(sample_df, z_threshold=3.0)
     assert "n_anomalies_flagged" in result
+    assert "anomalies" in result
+    assert "max_abs_z_score" in result
+
+
+def test_detect_anomalies_zscore_reports_z_score_sorted_most_extreme_first():
+    df = generate_synthetic_series(n_days=300)
+    df.loc[100, "value"] += 500  # huge spike
+    df.loc[150, "value"] += 60  # smaller, still-flagged bump
+
+    result = detect_anomalies_zscore(df, z_threshold=3.0)
+    assert result["n_anomalies_flagged"] >= 1
+    assert result["max_abs_z_score"] == max(abs(a["z_score"]) for a in result["anomalies"])
+
+    for anomaly in result["anomalies"]:
+        assert set(anomaly) == {"date", "value", "z_score"}
+
+    abs_z_scores = [abs(a["z_score"]) for a in result["anomalies"]]
+    assert abs_z_scores == sorted(abs_z_scores, reverse=True)
+    assert abs_z_scores[0] == result["max_abs_z_score"]
+
+
+def test_detect_anomalies_zscore_handles_no_anomalies():
+    df = generate_synthetic_series(n_days=100, noise_std=0.001, weekly_amplitude=0, yearly_amplitude=0)
+    result = detect_anomalies_zscore(df, z_threshold=8.0)
+    assert result["n_anomalies_flagged"] == 0
+    assert result["anomalies"] == []
+    assert result["max_abs_z_score"] is None

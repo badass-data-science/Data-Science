@@ -129,7 +129,11 @@ def acf_pacf_summary(
 ) -> dict:
     """Get autocorrelation and partial autocorrelation values, and which
     lags are statistically significant. Useful for identifying seasonality
-    period and candidate AR/MA order.
+    period and candidate AR/MA order. Each significant lag in
+    significant_acf_lags includes an effect_size (the ACF magnitude as a
+    multiple of the significance threshold), sorted strongest first, since
+    "significant" alone doesn't distinguish a barely-significant lag from
+    one that's 5x the threshold.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
@@ -150,7 +154,9 @@ def detect_anomalies_zscore(
 ) -> dict:
     """Flag observations that deviate sharply (by z_threshold standard
     deviations or more) from a local rolling mean — a simple anomaly /
-    outlier detector.
+    outlier detector. Each flagged point in `anomalies` includes its actual
+    z_score, sorted most extreme first, since a z-score of 3.1 and one of
+    11 both just clear a threshold of 3.0 but are very different findings.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
