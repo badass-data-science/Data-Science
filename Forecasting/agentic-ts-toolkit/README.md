@@ -1,6 +1,6 @@
 # agentic-ts-toolkit
 
-Four layers of agentic time series tooling, packaged as a normal
+Five layers of agentic time series tooling, packaged as a normal
 installable Python project. Each layer is a FastMCP server (typed tools)
 plus a companion OpenClaw skill (the reasoning workflow around those
 tools), bundled together so the whole thing installs and updates as one
@@ -17,6 +17,11 @@ package.
 - **Layer 4 — `ts-monitor`**: once real observations exist, check whether
   the deployed forecast is still tracking reality, detect data drift, and
   recommend whether to retrain.
+- **Layer 5 — `ts-retrain`**: when `ts-monitor` says `retrain_now`,
+  re-run Layers 1-2 on the updated series and deterministically decide
+  whether the freshly backtested candidate beats what's currently
+  deployed by enough to be worth redeploying. Never redeploys on its
+  own -- it stops for human confirmation.
 
 ## Project layout
 
@@ -47,17 +52,23 @@ agentic-ts-toolkit/
 │       │   ├── __init__.py
 │       │   ├── monitor_tools.py   # Layer 4 comparison/drift/retrain-decision functions
 │       │   └── server.py          # FastMCP server: ts-monitor
+│       ├── retrain/
+│       │   ├── __init__.py
+│       │   ├── retrain_tools.py   # Layer 5 deployment-manifest + redeploy-decision functions
+│       │   └── server.py          # FastMCP server: ts-retrain
 │       └── skills/                # bundled as package data -- see skills_dir()
 │           ├── ts-analyst/SKILL.md
 │           ├── ts-forecaster/SKILL.md
 │           ├── ts-deploy/SKILL.md
-│           └── ts-monitor/SKILL.md
+│           ├── ts-monitor/SKILL.md
+│           └── ts-retrain/SKILL.md
 └── tests/
     ├── test_data_prep.py
     ├── test_analyst_tools.py
     ├── test_forecaster_tools.py
     ├── test_deploy_tools.py
-    └── test_monitor_tools.py
+    ├── test_monitor_tools.py
+    └── test_retrain_tools.py
 ```
 
 ## What changed from the earlier ad-hoc layout
@@ -88,6 +99,7 @@ pip install -e ".[all]"       # every layer's dependencies
 #   pip install -e ".[analyst]"                 # Layer 1 only
 #   pip install -e ".[forecaster,deploy]"       # Layers 2+3
 #   pip install -e ".[monitor]"                 # Layer 4 only
+#   pip install -e ".[retrain]"                 # Layer 5 only (no extra deps beyond core)
 #   pip install -e ".[dev]"                     # + pytest, for running tests
 ```
 
@@ -103,6 +115,7 @@ ts-analyst-server      # Ctrl+C to stop; no output/crash = good
 ts-forecaster-server
 ts-deploy-server
 ts-monitor-server
+ts-retrain-server
 ```
 
 ### 4. Register with OpenClaw
@@ -148,6 +161,17 @@ Once time has passed and the CSV has real new observations:
 > Use ts-monitor to check whether that forecast is holding up against
 > what actually happened, and tell me if I should retrain.
 
+Right after that first real `ts-deploy` call, record what got deployed so
+Layer 5 has a baseline to compare against later:
+
+> Use ts-retrain to record that this model and its backtest metrics are
+> now deployed.
+
+If `ts-monitor` comes back with `retrain_now`:
+
+> Use ts-retrain to re-run analyst and forecaster on the updated series
+> and tell me whether the new candidate is actually worth redeploying.
+
 ## Publishing this to PyPI
 
 This layout is ready for it as-is:
@@ -182,12 +206,23 @@ Before actually publishing, you'll want to:
 - **`ts-monitor__recommend_retraining` is deliberately deterministic
   rather than left to model judgment** -- "should we retrain" is the kind
   of decision worth being reproducible given the same inputs.
+- **`ts-retrain` never calls `ts-deploy` and never redeploys anything
+  itself** -- it re-runs Layers 1-2, then hands the resulting candidate to
+  `ts-retrain__compare_candidate_to_deployed` (deterministic, same reason
+  as `recommend_retraining` above) and stops. Redeploying is a separate,
+  human-confirmed step.
+- **`ts-retrain`'s deployment manifest is the only piece of durable state
+  in the whole toolkit** -- a JSON file (`deployment_manifest.json` by
+  default, written next to the series CSV) recording what model/params/
+  backtest metrics are currently deployed. Nothing else persists between
+  calls; every other tool is a pure function of its inputs.
 
-## Next steps (Layer 5 preview)
+## Next steps
 
-A natural follow-up: an actual retraining *action* rather than just a
-recommendation -- logic that, when `ts-monitor` says `retrain_now`,
-automatically re-runs `ts-analyst` and `ts-forecaster` on the updated
-series, compares the newly chosen model/settings against the currently
-deployed ones, and only redeploys via `ts-deploy` if the new choice is a
-real improvement.
+With Layer 5 in place, a natural follow-up is an *optional* autonomous
+mode: given explicit opt-in (e.g. a flag or a standing instruction), skip
+the human-confirmation pause in Step 4 of `ts-retrain`'s workflow and let
+a `should_redeploy: true` verdict chain straight into `ts-deploy` and
+`record_deployment`. Deliberately not the default -- redeploying a live
+forecast unattended is a meaningfully different risk than the read-only
+diagnostics every other layer performs.

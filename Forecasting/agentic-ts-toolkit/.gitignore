@@ -28,3 +28,4 @@ htmlcov/
 # Local scratch data generated while testing the tools
 *.csv
 !tests/**/*.csv
+deployment_manifest*.json

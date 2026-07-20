@@ -36,6 +36,11 @@
         "command": "ts-monitor-server",
         "args": [],
         "transport": "stdio"
+      },
+      "ts-retrain": {
+        "command": "ts-retrain-server",
+        "args": [],
+        "transport": "stdio"
       }
     }
   },
@@ -60,6 +65,7 @@
 //     openclaw mcp tools ts-forecaster
 //     openclaw mcp tools ts-deploy
 //     openclaw mcp tools ts-monitor
+//     openclaw mcp tools ts-retrain
 // - Install the bundled skills into your OpenClaw workspace:
 //     cp -r "$(python -c 'import agentic_ts_toolkit as t; print(t.skills_dir())')"/* \
 //         ~/.openclaw/workspace/skills/

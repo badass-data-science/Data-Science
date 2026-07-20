@@ -36,6 +36,7 @@ analyst = ["statsmodels>=0.14"]
 forecaster = ["statsmodels>=0.14", "scikit-learn>=1.4"]
 deploy = ["statsmodels>=0.14", "scikit-learn>=1.4"]
 monitor = ["scipy>=1.11"]
+retrain = []
 all = ["statsmodels>=0.14", "scikit-learn>=1.4", "scipy>=1.11"]
 dev = ["pytest>=8.0"]
 
@@ -51,6 +52,7 @@ ts-analyst-server = "agentic_ts_toolkit.analyst.server:main"
 ts-forecaster-server = "agentic_ts_toolkit.forecaster.server:main"
 ts-deploy-server = "agentic_ts_toolkit.deploy.server:main"
 ts-monitor-server = "agentic_ts_toolkit.monitor.server:main"
+ts-retrain-server = "agentic_ts_toolkit.retrain.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_ts_toolkit"]
