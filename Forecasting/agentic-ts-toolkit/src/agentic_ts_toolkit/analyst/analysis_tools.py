@@ -16,6 +16,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from scipy.signal import periodogram
 from scipy.stats import t as _t_dist
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
@@ -306,6 +307,111 @@ def seasonal_decomposition_summary(df: pd.DataFrame, period: int = 7) -> dict:
     }
 
 
+def detect_seasonality_period(df: pd.DataFrame, min_period: int = 2, max_period: int = None) -> dict:
+    """Find the dominant cyclical period in a series via its periodogram,
+    with a significance test -- so the CALLER doesn't have to already
+    know/guess a period before using seasonal_decomposition_summary or
+    reading acf_pacf_summary's significant lags for a periodic pattern.
+
+    Ranks candidate periods (within [min_period, max_period], default
+    max_period = n // 2) by relative spectral power -- each period's share
+    of total periodogram power, which doubles as an effect size: a period
+    responsible for 60% of total power is a very different finding from
+    one responsible for 4%, even if both are the top-ranked candidate.
+
+    Significance of the single strongest frequency in the FULL periodogram
+    (not just the [min_period, max_period] range -- the significance test
+    needs the true, complete set of Fourier frequencies to be valid) is
+    assessed with Fisher's g-test for hidden periodicity (Fisher, 1929):
+    g = (power at the strongest frequency) / (total power across all
+    frequencies). This implementation uses the standard conservative
+    upper-bound approximation on the p-value, P(g > g0) <= q*(1-g0)^(q-1)
+    (q = number of non-zero Fourier frequencies) -- the leading term of
+    the full alternating-series formula, and the same approximation used
+    by, e.g., the GeneCycle R package's fisher.g.test.
+
+    The globally strongest frequency can correspond to a period OUTSIDE
+    [min_period, max_period] (e.g. period ~1-2, likely noise/edge effects,
+    or a period near the series length, likely trend) -- check
+    dominant_period_in_reported_range before treating the significance
+    test as endorsing one of the reported candidate periods specifically.
+    """
+    series = df["value"].dropna().to_numpy(dtype=float)
+    n = len(series)
+    if n < 8:
+        return {"error": f"Series too short ({n} observations) for periodogram-based seasonality detection."}
+    if max_period is None:
+        max_period = n // 2
+
+    demeaned = series - series.mean()
+    freqs, power = periodogram(demeaned)
+    freqs = freqs[1:]  # drop the zero-frequency term (undefined period)
+    power = power[1:]
+    q = len(freqs)  # number of non-zero Fourier frequencies, for the g-test
+
+    total_power = float(power.sum())
+    if q == 0 or total_power <= 0:
+        return {"error": "Series has no variance to analyze (constant series)."}
+
+    max_idx = int(np.argmax(power))
+    g0 = float(power[max_idx] / total_power)
+    dominant_period = float(1.0 / freqs[max_idx])
+    p_value = float(min(1.0, q * (1.0 - g0) ** (q - 1)))
+    is_significant = bool(p_value < 0.05)
+
+    periods = 1.0 / freqs
+    in_range = (periods >= min_period) & (periods <= max_period)
+    candidate_periods = periods[in_range]
+    candidate_power = power[in_range]
+
+    top_candidate_periods = []
+    if len(candidate_power) > 0:
+        order = np.argsort(candidate_power)[::-1]
+        top_candidate_periods = [
+            {
+                "period": round(float(candidate_periods[i]), 2),
+                "relative_power": round(float(candidate_power[i]) / total_power, 4),
+            }
+            for i in order[:5]
+        ]
+
+    dominant_in_range = bool(min_period <= dominant_period <= max_period)
+
+    if is_significant and dominant_in_range:
+        interpretation = (
+            f"Fisher's g-test rejects the no-periodicity null (p={round(p_value, 4)}): the "
+            f"dominant cycle has period ~{round(dominant_period, 2)}, accounting for "
+            f"{round(g0 * 100, 1)}% of total periodogram power."
+        )
+    elif is_significant:
+        interpretation = (
+            f"Fisher's g-test rejects the no-periodicity null (p={round(p_value, 4)}), but the "
+            f"single strongest frequency corresponds to period ~{round(dominant_period, 2)}, "
+            f"outside the [{min_period}, {max_period}] range treated as plausible seasonality "
+            "(likely a trend or edge-effect artifact, not true seasonality). See "
+            "top_candidate_periods for the strongest candidate actually within that range."
+        )
+    else:
+        interpretation = (
+            f"Fisher's g-test fails to reject the no-periodicity null (p={round(p_value, 4)}): "
+            "no single frequency dominates the periodogram enough to call this a statistically "
+            "significant cycle. top_candidate_periods still lists the largest relative-power "
+            "candidates for reference, but treat them as suggestive, not confirmed."
+        )
+
+    return {
+        "n_observations": n,
+        "dominant_period": round(dominant_period, 2),
+        "dominant_period_relative_power": round(g0, 4),
+        "dominant_period_in_reported_range": dominant_in_range,
+        "fisher_g_statistic": round(g0, 4),
+        "fisher_g_p_value": round(p_value, 4),
+        "is_significant_periodicity": is_significant,
+        "top_candidate_periods": top_candidate_periods,
+        "interpretation": interpretation,
+    }
+
+
 def acf_pacf_summary(df: pd.DataFrame, n_lags: int = 21, alpha: float = 0.05) -> dict:
     """Autocorrelation / partial autocorrelation at selected lags. Useful for
     spotting seasonality period and deciding AR/MA order.
@@ -398,13 +504,287 @@ def detect_anomalies_zscore(df: pd.DataFrame, z_threshold: float = 3.0) -> dict:
     }
 
 
+def _rolling_mad(series: pd.Series, rolling_median: pd.Series, window: int) -> pd.Series:
+    """Rolling median absolute deviation, using each window's OWN median
+    as the reference point (not a mismatched running comparison) -- the
+    `.apply` here recomputes np.median(x) on each window slice `x`
+    internally, which is guaranteed to equal the corresponding entry of
+    `rolling_median` as long as both share identical window/min_periods/
+    center settings (checked by the caller).
+    """
+    def mad(x):
+        return np.median(np.abs(x - np.median(x)))
+
+    return series.rolling(window=window, min_periods=1, center=True).apply(mad, raw=True)
+
+
+def detect_anomalies_robust_zscore(df: pd.DataFrame, z_threshold: float = 3.5, window: int = 14) -> dict:
+    """Robust anomaly detection using a rolling MODIFIED z-score (rolling
+    median + MAD, Iglewicz & Hoya 1993) instead of detect_anomalies_zscore's
+    rolling mean + std.
+
+    detect_anomalies_zscore's rolling mean/std is distorted by the very
+    anomaly it's trying to measure: a single large spike inside its
+    14-point rolling window inflates that window's own std, diluting the
+    z-score of the point that caused it -- confirmed empirically during
+    development, where a +500 spike on a ~200-scale series only scored
+    z=3.44, not something far higher. Median and MAD are far less
+    sensitive to a single outlier within a window (the median of 14
+    points barely moves if only one is wildly off), so this detector
+    doesn't have that self-dilution problem.
+
+    modified_z_i = 0.6745 * (x_i - rolling_median_i) / rolling_MAD_i
+
+    0.6745 rescales MAD to be comparable to a standard deviation under
+    normality, so z_threshold here is on roughly the same scale as
+    detect_anomalies_zscore's -- but the DEFAULT is 3.5, not 3.0, per
+    Iglewicz & Hoya's recommendation for the modified z-score
+    specifically (not simply copied from the non-robust version).
+
+    Prefer this over detect_anomalies_zscore when you suspect a single
+    large anomaly might be masking itself (or nearby points) via
+    self-dilution; prefer detect_anomalies_zscore when you want the
+    conventional mean/std definition specifically (e.g. to match a
+    downstream process that assumes it).
+    """
+    series = df["value"]
+    rolling_median = series.rolling(window=window, min_periods=1, center=True).median()
+    rolling_mad = _rolling_mad(series, rolling_median, window).replace(0, np.nan)
+
+    modified_z = 0.6745 * (series - rolling_median) / rolling_mad
+    flagged_mask = modified_z.abs() > z_threshold
+    flagged = df.loc[flagged_mask, ["date", "value"]].copy()
+    flagged["modified_z_score"] = modified_z.loc[flagged_mask]
+
+    # Most extreme first, so capping for brevity below keeps the biggest
+    # anomalies rather than just the earliest ones chronologically.
+    flagged = flagged.reindex(flagged["modified_z_score"].abs().sort_values(ascending=False).index)
+
+    anomalies = [
+        {
+            "date": str(row["date"].date()),
+            "value": round(float(row["value"]), 3),
+            "modified_z_score": round(float(row["modified_z_score"]), 3),
+        }
+        for _, row in flagged.iterrows()
+    ]
+
+    return {
+        "z_threshold": z_threshold,
+        "window": window,
+        "n_anomalies_flagged": int(len(flagged)),
+        "max_abs_modified_z_score": (
+            round(float(flagged["modified_z_score"].abs().max()), 3) if len(flagged) else None
+        ),
+        "anomalies": anomalies[:15],  # cap for brevity, most extreme first
+    }
+
+
+def _cusum_statistic(values: np.ndarray):
+    """Standardized CUSUM mean-shift statistic, vectorized over every
+    candidate split point k=1..n-1: compares the mean of values[:k] to
+    the mean of values[k:], weighted by segment sizes and standardized by
+    the whole segment's std. Returns (best_k, best_statistic), or
+    (None, 0.0) if the segment is too short or has zero variance.
+
+    This flags a shift in MEAN LEVEL specifically -- not a change in
+    variance or trend slope alone, and not the same job as
+    detect_anomalies_zscore/detect_anomalies_robust_zscore (a single
+    large point spike vs. a lasting shift in the series' level).
+    """
+    n = len(values)
+    if n < 4:
+        return None, 0.0
+    overall_std = float(np.std(values, ddof=1))
+    if overall_std == 0:
+        return None, 0.0
+
+    k = np.arange(1, n)
+    cumsum = np.cumsum(values)
+    total = cumsum[-1]
+    mean_before = cumsum[:-1] / k
+    mean_after = (total - cumsum[:-1]) / (n - k)
+    stats = np.sqrt(k * (n - k) / n) * np.abs(mean_before - mean_after) / overall_std
+
+    best_idx = int(np.argmax(stats))
+    return int(k[best_idx]), float(stats[best_idx])
+
+
+def _cusum_p_value(values: np.ndarray, observed_stat: float, n_permutations: int, rng: np.random.Generator) -> float:
+    """Permutation-test p-value for the CUSUM statistic: shuffle the
+    segment (destroying any real changepoint while preserving its
+    values' distribution) n_permutations times, and see how often a
+    shuffled segment's best CUSUM statistic meets or exceeds the observed
+    one. A closed-form asymptotic distribution exists for this statistic,
+    but its critical values require care to get right; a permutation
+    test sidesteps that and is exact/nonparametric by construction --
+    the same reasoning ts-deploy's forecast_ets already uses simulation
+    (n_simulations) for its prediction intervals rather than a
+    closed-form formula.
+    """
+    shuffled = values.copy()
+    count_exceeding = 0
+    for _ in range(n_permutations):
+        rng.shuffle(shuffled)
+        _, stat = _cusum_statistic(shuffled)
+        if stat >= observed_stat:
+            count_exceeding += 1
+    # +1 smoothing in both numerator and denominator: standard permutation-
+    # test convention, avoids ever reporting p=0 from a finite sample.
+    return (count_exceeding + 1) / (n_permutations + 1)
+
+
+def _binary_segmentation(
+    values: np.ndarray,
+    start: int,
+    end: int,
+    alpha: float,
+    min_segment_size: int,
+    n_permutations: int,
+    rng: np.random.Generator,
+    max_changepoints: int,
+    changepoints: list,
+) -> None:
+    """Recursively find the single most likely changepoint in
+    values[start:end]; if significant, record it and recurse into both
+    halves. Standard binary segmentation (Scott & Knott 1974; Vostrikova
+    1981) -- a well-established heuristic for MULTIPLE changepoints, built
+    from repeated single-changepoint (CUSUM) tests.
+    """
+    if len(changepoints) >= max_changepoints:
+        return
+    if end - start < 2 * min_segment_size:
+        return
+
+    segment = values[start:end]
+    k, stat = _cusum_statistic(segment)
+    if k is None or k < min_segment_size or (len(segment) - k) < min_segment_size:
+        return
+
+    p_value = _cusum_p_value(segment, stat, n_permutations, rng)
+    if p_value >= alpha:
+        return
+
+    split = start + k
+    changepoints.append({"index": split, "statistic": stat, "p_value": p_value})
+    _binary_segmentation(values, start, split, alpha, min_segment_size, n_permutations, rng, max_changepoints, changepoints)
+    _binary_segmentation(values, split, end, alpha, min_segment_size, n_permutations, rng, max_changepoints, changepoints)
+
+
+def detect_changepoints(
+    df: pd.DataFrame,
+    alpha: float = 0.05,
+    min_segment_size: int = 10,
+    max_changepoints: int = 5,
+    n_permutations: int = 500,
+    seed: int = 42,
+) -> dict:
+    """Detect structural breaks (lasting shifts in the series' MEAN
+    LEVEL) using binary segmentation with a standardized CUSUM statistic
+    and a permutation test for significance -- a different job from
+    detect_anomalies_zscore/detect_anomalies_robust_zscore, which flag
+    individual POINT outliers, not a persistent shift from one regime to
+    the next. A single very large, isolated spike can trip an anomaly
+    detector without being a real changepoint; a modest but sustained
+    level shift can be a real changepoint without tripping either
+    anomaly detector.
+
+    Each detected changepoint reports Cohen's d (pooled-std standardized
+    mean difference between the segments immediately before and after)
+    as an effect size, plus the CUSUM statistic and permutation p-value
+    from the split that found it.
+
+    KNOWN LIMITATION (by design, not a bug): binary segmentation's
+    per-split p-values are LOCAL tests within whatever segment existed at
+    the time of that split -- the algorithm does not give an exact global
+    significance guarantee for the full SET of changepoints it reports,
+    the way a single hypothesis test would. This is a standard, accepted
+    tradeoff for this class of algorithm, not unique to this
+    implementation; treat max_changepoints and alpha as tuning knobs, not
+    as controlling an exact family-wise error rate.
+
+    The permutation test is seeded (default 42) for reproducibility --
+    the same series and settings always return the same changepoints.
+
+    Args:
+        alpha: Significance level for each split's permutation test.
+        min_segment_size: Minimum observations required on each side of
+            a candidate split; also the minimum resulting segment size.
+        max_changepoints: Upper bound on how many changepoints to report.
+        n_permutations: Permutations used per significance test. Higher
+            is more precise but slower (roughly linear in this value).
+        seed: Random seed for the permutation test's shuffling, for
+            reproducibility.
+    """
+    series = df["value"].dropna().reset_index(drop=True)
+    values = series.to_numpy(dtype=float)
+    n = len(values)
+    if n < 2 * min_segment_size:
+        return {
+            "error": (
+                f"Series too short ({n} observations) for changepoint detection with "
+                f"min_segment_size={min_segment_size} (need at least {2 * min_segment_size})."
+            )
+        }
+
+    dates = df["date"].reset_index(drop=True)
+    rng = np.random.default_rng(seed)
+    raw_changepoints: list = []
+    _binary_segmentation(values, 0, n, alpha, min_segment_size, n_permutations, rng, max_changepoints, raw_changepoints)
+    raw_changepoints.sort(key=lambda c: c["index"])
+
+    boundaries = [0] + [cp["index"] for cp in raw_changepoints] + [n]
+    results = []
+    for i, cp in enumerate(raw_changepoints):
+        seg_before = values[boundaries[i]:boundaries[i + 1]]
+        seg_after = values[boundaries[i + 1]:boundaries[i + 2]]
+        n1, n2 = len(seg_before), len(seg_after)
+        mean_before, mean_after = float(np.mean(seg_before)), float(np.mean(seg_after))
+        s1, s2 = np.std(seg_before, ddof=1), np.std(seg_after, ddof=1)
+        pooled_var_df = n1 + n2 - 2
+        pooled_std = float(np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / pooled_var_df)) if pooled_var_df > 0 else 0.0
+        cohens_d = round(abs(mean_after - mean_before) / pooled_std, 4) if pooled_std > 0 else None
+
+        results.append(
+            {
+                "date": str(dates.iloc[cp["index"]].date()),
+                "index": cp["index"],
+                "mean_before": round(mean_before, 3),
+                "mean_after": round(mean_after, 3),
+                "cohens_d_effect_size": cohens_d,
+                "cusum_statistic": round(cp["statistic"], 4),
+                "p_value": round(cp["p_value"], 4),
+            }
+        )
+
+    if not results:
+        interpretation = f"No statistically significant structural breaks found (alpha={alpha}) in {n} observations."
+    else:
+        interpretation = f"{len(results)} structural break(s) found: " + "; ".join(
+            f"{r['date']} (mean {r['mean_before']} -> {r['mean_after']}, "
+            f"Cohen's d={r['cohens_d_effect_size']}, p={r['p_value']})"
+            for r in results
+        )
+
+    return {
+        "n_observations": n,
+        "alpha": alpha,
+        "n_changepoints_found": len(results),
+        "changepoints": results,
+        "interpretation": interpretation,
+    }
+
+
 # Registry used by agent.py to expose these as callable tools by name.
 TOOL_REGISTRY = {
     "basic_stats": basic_stats,
     "check_stationarity": check_stationarity,
     "seasonal_decomposition_summary": seasonal_decomposition_summary,
+    "detect_seasonality_period": detect_seasonality_period,
     "acf_pacf_summary": acf_pacf_summary,
     "detect_anomalies_zscore": detect_anomalies_zscore,
+    "detect_anomalies_robust_zscore": detect_anomalies_robust_zscore,
+    "detect_changepoints": detect_changepoints,
 }
 
 

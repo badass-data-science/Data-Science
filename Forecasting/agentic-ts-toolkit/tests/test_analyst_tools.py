@@ -9,8 +9,11 @@ from agentic_ts_toolkit.analyst.analysis_tools import (
     basic_stats,
     check_stationarity,
     seasonal_decomposition_summary,
+    detect_seasonality_period,
     acf_pacf_summary,
     detect_anomalies_zscore,
+    detect_anomalies_robust_zscore,
+    detect_changepoints,
 )
 
 
@@ -173,6 +176,41 @@ def test_seasonal_decomposition_summary(sample_df):
     assert 0 <= result["seasonal_strength"] <= 1
 
 
+def test_detect_seasonality_period_finds_weekly_seasonality():
+    df = generate_synthetic_series(n_days=300)  # trend + weekly + yearly seasonality
+    result = detect_seasonality_period(df)
+
+    periods = [c["period"] for c in result["top_candidate_periods"]]
+    assert any(abs(p - 7) < 0.5 for p in periods)
+    # The strongest in-range candidate should be the weekly period, and
+    # it should carry a large share of total periodogram power.
+    top = result["top_candidate_periods"][0]
+    assert abs(top["period"] - 7) < 0.5
+    assert top["relative_power"] > 0.1
+
+
+def test_detect_seasonality_period_flags_dominant_period_out_of_range():
+    # The series' own trend dominates the raw periodogram at the lowest
+    # frequency (period ~= series length), which sits outside the
+    # reported [min_period, max_period] range by construction.
+    df = generate_synthetic_series(n_days=300)
+    result = detect_seasonality_period(df, min_period=2, max_period=150)
+    assert result["dominant_period_in_reported_range"] is False
+    assert result["dominant_period"] > 150
+
+
+def test_detect_seasonality_period_handles_constant_series():
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=20, freq="D"), "value": [5.0] * 20})
+    result = detect_seasonality_period(df)
+    assert "error" in result
+
+
+def test_detect_seasonality_period_handles_too_short_series():
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=5, freq="D"), "value": [1, 2, 3, 4, 5]})
+    result = detect_seasonality_period(df)
+    assert "error" in result
+
+
 def test_acf_pacf_summary(sample_df):
     result = acf_pacf_summary(sample_df, n_lags=14)
     assert result["n_lags_checked"] == 14
@@ -237,3 +275,101 @@ def test_detect_anomalies_zscore_handles_no_anomalies():
     assert result["n_anomalies_flagged"] == 0
     assert result["anomalies"] == []
     assert result["max_abs_z_score"] is None
+
+
+def test_detect_anomalies_robust_zscore_fixes_self_dilution():
+    # detect_anomalies_zscore's rolling std is inflated by the very spike
+    # it's trying to measure (confirmed during development: a +500 spike
+    # only scored z=3.44, not something far higher). The robust
+    # (median/MAD) version shouldn't have that self-dilution problem.
+    df = generate_synthetic_series(n_days=300)
+    df.loc[100, "value"] += 500
+
+    non_robust = detect_anomalies_zscore(df, z_threshold=3.0)
+    robust = detect_anomalies_robust_zscore(df, z_threshold=3.5)
+
+    assert non_robust["n_anomalies_flagged"] >= 1
+    assert robust["n_anomalies_flagged"] >= 1
+    assert robust["max_abs_modified_z_score"] > non_robust["max_abs_z_score"] * 2
+
+    for anomaly in robust["anomalies"]:
+        assert set(anomaly) == {"date", "value", "modified_z_score"}
+
+
+def test_detect_anomalies_robust_zscore_sorted_most_extreme_first():
+    df = generate_synthetic_series(n_days=300)
+    df.loc[100, "value"] += 500
+    df.loc[150, "value"] += 150  # smaller than the first spike, but still flagged
+
+    result = detect_anomalies_robust_zscore(df, z_threshold=3.5)
+    assert result["n_anomalies_flagged"] >= 2
+    abs_scores = [abs(a["modified_z_score"]) for a in result["anomalies"]]
+    assert abs_scores == sorted(abs_scores, reverse=True)
+    assert abs_scores[0] == result["max_abs_modified_z_score"]
+
+
+def test_detect_anomalies_robust_zscore_handles_no_anomalies():
+    df = generate_synthetic_series(n_days=100, noise_std=0.001, weekly_amplitude=0, yearly_amplitude=0)
+    result = detect_anomalies_robust_zscore(df, z_threshold=8.0)
+    assert result["n_anomalies_flagged"] == 0
+    assert result["anomalies"] == []
+    assert result["max_abs_modified_z_score"] is None
+
+
+def _level_shift_df(seed: int = 0, n: int = 200, shift_at: int = 100, shift_size: float = 5.0) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    y = rng.normal(0, 1.0, size=n)
+    y[shift_at:] += shift_size
+    return pd.DataFrame({"date": pd.date_range("2024-01-01", periods=n, freq="D"), "value": y})
+
+
+def test_detect_changepoints_finds_a_clean_level_shift():
+    df = _level_shift_df()
+    result = detect_changepoints(df)
+
+    assert result["n_changepoints_found"] == 1
+    cp = result["changepoints"][0]
+    assert cp["index"] == 100
+    assert cp["mean_after"] - cp["mean_before"] == pytest.approx(5.0, abs=0.5)
+    assert cp["cohens_d_effect_size"] > 1  # a 5-sigma shift is a huge effect
+    assert cp["p_value"] < 0.05
+
+
+def test_detect_changepoints_finds_no_break_in_pure_noise():
+    rng = np.random.default_rng(1)
+    n = 200
+    df = pd.DataFrame(
+        {"date": pd.date_range("2024-01-01", periods=n, freq="D"), "value": rng.normal(0, 1.0, size=n)}
+    )
+    result = detect_changepoints(df)
+    assert result["n_changepoints_found"] == 0
+    assert result["changepoints"] == []
+
+
+def test_detect_changepoints_finds_two_breaks():
+    rng = np.random.default_rng(2)
+    n = 300
+    y = rng.normal(0, 1.0, size=n)
+    y[100:200] += 6.0
+    y[200:] -= 3.0
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=n, freq="D"), "value": y})
+
+    result = detect_changepoints(df)
+    assert result["n_changepoints_found"] == 2
+    indices = [cp["index"] for cp in result["changepoints"]]
+    assert indices == sorted(indices)  # reported in chronological order
+    assert indices[0] == 100
+    assert indices[1] == 200
+
+
+def test_detect_changepoints_is_deterministic_given_the_same_seed():
+    df = _level_shift_df()
+    result_a = detect_changepoints(df, seed=42)
+    result_b = detect_changepoints(df, seed=42)
+    assert result_a == result_b
+
+
+def test_detect_changepoints_handles_too_short_series():
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=5, freq="D"), "value": [1, 2, 3, 4, 5]})
+    result = detect_changepoints(df, min_segment_size=10)
+    assert "error" in result

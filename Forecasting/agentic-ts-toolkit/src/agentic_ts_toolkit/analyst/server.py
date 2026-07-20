@@ -21,8 +21,11 @@ from .analysis_tools import (
     basic_stats as _basic_stats,
     check_stationarity as _check_stationarity,
     seasonal_decomposition_summary as _seasonal_decomposition_summary,
+    detect_seasonality_period as _detect_seasonality_period,
     acf_pacf_summary as _acf_pacf_summary,
     detect_anomalies_zscore as _detect_anomalies_zscore,
+    detect_anomalies_robust_zscore as _detect_anomalies_robust_zscore,
+    detect_changepoints as _detect_changepoints,
 )
 from agentic_ts_toolkit.data_prep import generate_synthetic_series, load_series
 
@@ -139,6 +142,41 @@ def seasonal_decomposition_summary(
 
 
 @mcp.tool()
+def detect_seasonality_period(
+    csv_path: str,
+    min_period: int = 2,
+    max_period: Optional[int] = None,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Find the dominant cyclical period in a series via its periodogram,
+    with a significance test (Fisher's g-test for hidden periodicity) --
+    so you don't have to already know/guess a period before calling
+    seasonal_decomposition_summary or reading acf_pacf_summary's
+    significant lags for a periodic pattern. Ranks candidate periods
+    within [min_period, max_period] (default max_period = n // 2) by
+    relative spectral power, an effect size in its own right. Check
+    dominant_period_in_reported_range before treating the significance
+    test as endorsing one of the reported candidates specifically -- the
+    single globally strongest frequency can correspond to a period
+    outside that range (e.g. trend, or a very short edge-effect period).
+
+    Args:
+        csv_path: Path to a CSV with a date column and a value column.
+        min_period: Smallest period (in observations) worth reporting as
+            a candidate. A period must repeat at least twice to be a
+            meaningful cycle.
+        max_period: Largest period worth reporting. Defaults to half the
+            series length (periods near the series length aren't
+            distinguishable from trend).
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+    """
+    df = load_series(csv_path, date_col, value_col)
+    return _detect_seasonality_period(df, min_period=min_period, max_period=max_period)
+
+
+@mcp.tool()
 def acf_pacf_summary(
     csv_path: str,
     n_lags: int = 21,
@@ -192,6 +230,84 @@ def detect_anomalies_zscore(
     """
     df = load_series(csv_path, date_col, value_col)
     return _detect_anomalies_zscore(df, z_threshold=z_threshold)
+
+
+@mcp.tool()
+def detect_anomalies_robust_zscore(
+    csv_path: str,
+    z_threshold: float = 3.5,
+    window: int = 14,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Robust anomaly detection using a rolling MODIFIED z-score (rolling
+    median + MAD, Iglewicz & Hoya 1993) instead of detect_anomalies_zscore's
+    rolling mean + std. detect_anomalies_zscore's rolling std is distorted
+    by the very anomaly it's trying to measure -- a single large spike
+    inside its rolling window inflates that window's own std, diluting
+    the z-score of the point that caused it. Median/MAD are far less
+    sensitive to a single outlier within a window, so this doesn't have
+    that self-dilution problem. Default z_threshold is 3.5, not 3.0 --
+    the Iglewicz & Hoya-recommended default for the modified z-score
+    specifically, not copied from the non-robust version.
+
+    Args:
+        csv_path: Path to a CSV with a date column and a value column.
+        z_threshold: Modified z-score magnitude to flag as anomalous.
+        window: Rolling window size (centered) for the local median/MAD.
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+    """
+    df = load_series(csv_path, date_col, value_col)
+    return _detect_anomalies_robust_zscore(df, z_threshold=z_threshold, window=window)
+
+
+@mcp.tool()
+def detect_changepoints(
+    csv_path: str,
+    alpha: float = 0.05,
+    min_segment_size: int = 10,
+    max_changepoints: int = 5,
+    n_permutations: int = 500,
+    seed: int = 42,
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Detect structural breaks (lasting shifts in the series' MEAN
+    LEVEL) using binary segmentation with a CUSUM statistic and a
+    permutation test for significance -- a different job from
+    detect_anomalies_zscore/detect_anomalies_robust_zscore, which flag
+    individual POINT outliers, not a persistent shift from one regime to
+    the next. Each changepoint reports Cohen's d (pooled-std standardized
+    mean difference between the segments immediately before/after) as an
+    effect size. KNOWN LIMITATION: binary segmentation's per-split
+    p-values are local tests, not an exact global significance guarantee
+    for the full set of changepoints reported -- a standard, accepted
+    tradeoff for this class of algorithm. Results are deterministic given
+    the same seed.
+
+    Args:
+        csv_path: Path to a CSV with a date column and a value column.
+        alpha: Significance level for each split's permutation test.
+        min_segment_size: Minimum observations required on each side of
+            a candidate split; also the minimum resulting segment size.
+        max_changepoints: Upper bound on how many changepoints to report.
+        n_permutations: Permutations used per significance test. Higher
+            is more precise but slower.
+        seed: Random seed for the permutation test's shuffling, for
+            reproducibility.
+        date_col: Name of the date column in the CSV.
+        value_col: Name of the value column in the CSV.
+    """
+    df = load_series(csv_path, date_col, value_col)
+    return _detect_changepoints(
+        df,
+        alpha=alpha,
+        min_segment_size=min_segment_size,
+        max_changepoints=max_changepoints,
+        n_permutations=n_permutations,
+        seed=seed,
+    )
 
 
 def main():

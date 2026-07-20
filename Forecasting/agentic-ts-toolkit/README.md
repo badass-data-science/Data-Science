@@ -7,7 +7,8 @@ tools), bundled together so the whole thing installs and updates as one
 package.
 
 - **Layer 1 — `ts-analyst`**: explore a series (stationarity, seasonality,
-  anomalies) and recommend a forecasting approach with reasoning.
+  anomalies, structural breaks) and recommend a forecasting approach with
+  reasoning.
 - **Layer 2 — `ts-forecaster`**: fit candidate models against a common
   held-out window, backtest them, and recommend one with reasoning
   grounded in real error metrics and residual diagnostics.
@@ -269,6 +270,41 @@ Before actually publishing, you'll want to:
   `significance_alpha`), and `detect_anomalies_zscore` returned
   `anomaly_dates` (date strings only, no magnitude) instead of
   `anomalies`.
+- **`ts-analyst__detect_seasonality_period` finds a candidate seasonal
+  period FOR you** (via periodogram + Fisher's g-test), rather than
+  requiring you to already know one before calling
+  `seasonal_decomposition_summary` or `acf_pacf_summary`. The
+  significance test applies to the single globally strongest frequency in
+  the FULL periodogram, which can correspond to a period outside the
+  reported `[min_period, max_period]` range (commonly the series' own
+  trend, at a period near its full length) -- always check
+  `dominant_period_in_reported_range` before treating the significance
+  test as endorsing one of `top_candidate_periods` specifically. The
+  p-value uses the standard conservative upper-bound approximation for
+  Fisher's g-test, not the full alternating-series formula.
+- **`ts-analyst__detect_anomalies_robust_zscore` exists because the
+  original `detect_anomalies_zscore` has a real, confirmed weakness**:
+  its rolling window's own std is inflated by the very anomaly it's
+  trying to measure (a +500 spike on a ~200-scale series only scored
+  z=3.44, not something far higher). The robust version uses a rolling
+  median + MAD (modified z-score, Iglewicz & Hoya 1993) instead, which
+  isn't self-diluted the same way -- confirmed on the same spike, it
+  scores 17.26. Default `z_threshold` is 3.5, not 3.0 (the
+  literature-recommended default for the modified z-score specifically).
+  Neither tool replaces the other -- reach for the robust version when
+  you suspect self-dilution might be masking a real anomaly.
+- **`ts-analyst__detect_changepoints` flags a lasting shift in the
+  series' MEAN LEVEL, not a point anomaly** -- a different job from
+  either `detect_anomalies_zscore` variant above. Uses binary
+  segmentation with a CUSUM statistic and a permutation test (deterministic
+  given the same `seed`, default 42). Each changepoint reports Cohen's d
+  as an effect size. **Known limitation, not a bug**: binary
+  segmentation's per-split p-values are local tests within whatever
+  segment existed at that point in the recursion -- there's no exact
+  global significance guarantee for the full set of changepoints
+  reported. This is a standard, accepted tradeoff for this class of
+  algorithm; treat `alpha`/`max_changepoints` as tuning knobs, not as
+  controlling an exact false-discovery rate.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.
