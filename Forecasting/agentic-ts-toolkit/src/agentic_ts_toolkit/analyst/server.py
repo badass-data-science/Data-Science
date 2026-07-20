@@ -69,6 +69,10 @@ def check_stationarity(csv_path: str, date_col: str = "date", value_col: str = "
     """Run an Augmented Dickey-Fuller test to check whether a time series
     is stationary. A p-value below 0.05 suggests the series is stationary;
     otherwise it likely has a trend or unit root and may need differencing.
+    Also returns a mean-reversion effect size (mean_reversion_lambda,
+    mean_reversion_half_life_periods): a series can be statistically
+    stationary yet revert so slowly the half-life is impractically long
+    for short-horizon forecasting, so check both, not just the p-value.
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.

@@ -213,6 +213,16 @@ Before actually publishing, you'll want to:
 
 ## Things worth knowing about specific tools (carried over from earlier layers)
 
+- **`ts-analyst__check_stationarity` reports a mean-reversion effect size**
+  (`mean_reversion_lambda`, `mean_reversion_half_life_periods`) alongside
+  the ADF p-value -- a series can clear `p < 0.05` while reverting so
+  slowly the half-life is impractically long for a short-horizon
+  forecast, so check both, not just the p-value. Don't read a small
+  positive (or slightly negative-but-near-zero) `mean_reversion_lambda`
+  as proof of "no reversion" on its own -- under a true unit root, this
+  OLS estimate is known to skew slightly negative in finite samples;
+  `is_likely_stationary` and the half-life's magnitude are the more
+  reliable signals.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.
