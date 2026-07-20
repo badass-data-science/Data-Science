@@ -213,16 +213,28 @@ Before actually publishing, you'll want to:
 
 ## Things worth knowing about specific tools (carried over from earlier layers)
 
-- **`ts-analyst__check_stationarity` reports a mean-reversion effect size**
-  (`mean_reversion_lambda`, `mean_reversion_half_life_periods`) alongside
-  the ADF p-value -- a series can clear `p < 0.05` while reverting so
-  slowly the half-life is impractically long for a short-horizon
-  forecast, so check both, not just the p-value. Don't read a small
-  positive (or slightly negative-but-near-zero) `mean_reversion_lambda`
-  as proof of "no reversion" on its own -- under a true unit root, this
-  OLS estimate is known to skew slightly negative in finite samples;
-  `is_likely_stationary` and the half-life's magnitude are the more
-  reliable signals.
+- **`ts-analyst__check_stationarity` runs both ADF and KPSS and combines
+  them into one joint verdict, each with its own effect size.** ADF's
+  null is a unit root; KPSS's null is stationarity -- opposite nulls, so
+  running both and reading `interpretation`'s four-way readout (agree
+  stationary / agree non-stationary / disagree in either direction) is
+  standard practice, not redundant. `adf_p_value`/`adf_is_likely_stationary`
+  come with a mean-reversion effect size (`mean_reversion_lambda`,
+  `mean_reversion_half_life_periods`) -- a series can clear `p < 0.05`
+  while reverting so slowly the half-life is impractically long for a
+  short-horizon forecast, so check both, not just the p-value. Don't read
+  a small positive (or slightly negative-but-near-zero)
+  `mean_reversion_lambda` as proof of "no reversion" on its own -- under a
+  true unit root, this OLS estimate is known to skew slightly negative in
+  finite samples; `adf_is_likely_stationary` and the half-life's magnitude
+  are the more reliable signals. `kpss_p_value`/`kpss_is_likely_stationary`
+  come with `kpss_effect_size` (the statistic as a multiple of its 5%
+  critical value) -- KPSS's own p-value is clipped at lookup-table
+  boundaries, so the effect size is what actually distinguishes a
+  borderline result from a wildly non-stationary one once the p-value is
+  pinned at 0.01 or 0.10. Note the field names changed from the tool's
+  original single-test version (`p_value`/`is_likely_stationary` are now
+  `adf_p_value`/`adf_is_likely_stationary`).
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.

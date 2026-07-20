@@ -12,10 +12,13 @@ in what order, and how to interpret the results.
 """
 
 import json
+import warnings
+
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import adfuller, acf, pacf
+from statsmodels.tsa.stattools import adfuller, acf, kpss, pacf
 from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tools.sm_exceptions import InterpolationWarning
 
 
 def basic_stats(df: pd.DataFrame) -> dict:
@@ -70,45 +73,130 @@ def _mean_reversion_effect_size(values: np.ndarray) -> dict:
     }
 
 
-def check_stationarity(df: pd.DataFrame) -> dict:
-    """Augmented Dickey-Fuller test for stationarity, plus an effect size.
+def _kpss_effect_size(series: pd.Series, regression: str = "c") -> dict:
+    """Effect size for the KPSS test: how far the statistic sits from its
+    5% critical value, expressed as a ratio.
 
-    Null hypothesis: the series has a unit root (i.e. is non-stationary).
-    A small p-value (< 0.05) lets us reject that, suggesting stationarity.
+    KPSS's own p-value is coarse -- statsmodels interpolates it from just
+    four lookup-table points (10%, 5%, 2.5%, 1%) and clips it at the
+    table's edges. That means a wildly non-stationary series and a barely
+    non-stationary one can both report p_value=0.01, with the p-value
+    alone giving no way to tell them apart. `effect_size` (kpss_statistic
+    / critical_value_5pct) keeps distinguishing magnitude past that
+    boundary: comfortably below 1 means well within the stationary
+    region; values well above 1 mean the statistic exceeds the 5%
+    critical value by that many multiples.
 
-    The ADF test alone only answers "is there a unit root" -- it says
-    nothing about how strongly the series mean-reverts. This also reports
-    a mean-reversion effect size (see _mean_reversion_effect_size): a
-    negative `mean_reversion_lambda` with a short
-    `mean_reversion_half_life_periods` indicates fast, practically
-    meaningful reversion; a lambda near zero (or a very long half-life)
-    indicates the series may be statistically stationary but reverts too
-    slowly to matter much for short-horizon forecasting.
+    The InterpolationWarning statsmodels raises when the p-value hits a
+    table boundary is suppressed here on purpose: this effect size is
+    specifically a more informative answer to the same limitation that
+    warning is pointing at, not something being papered over.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=InterpolationWarning)
+        kpss_stat, p_value, lags, crit = kpss(series, regression=regression, nlags="auto")
+
+    crit_5pct = float(crit["5%"])
+    return {
+        "statistic": round(float(kpss_stat), 4),
+        "p_value": round(float(p_value), 4),
+        "lags": int(lags),
+        "critical_value_5pct": crit_5pct,
+        "effect_size": round(float(kpss_stat) / crit_5pct, 4),
+    }
+
+
+def _combined_stationarity_interpretation(adf_stationary: bool, kpss_stationary: bool) -> str:
+    """Joint ADF/KPSS interpretation. The two tests have opposite null
+    hypotheses (ADF: non-stationary; KPSS: stationary), so running both
+    and reading them together is standard practice -- each test's blind
+    spot is roughly the other's strength.
+    """
+    if adf_stationary and kpss_stationary:
+        return "ADF and KPSS agree: series is likely stationary."
+    if not adf_stationary and not kpss_stationary:
+        return "ADF and KPSS agree: series is likely non-stationary; differencing may be needed."
+    if adf_stationary and not kpss_stationary:
+        return (
+            "ADF and KPSS disagree: ADF rejects a unit root (stationary) but KPSS "
+            "rejects stationarity. This combination commonly indicates the series is "
+            "trend-stationary rather than level-stationary -- consider re-running with "
+            "kpss_regression='ct', or detrending before further analysis."
+        )
+    return (
+        "ADF and KPSS disagree: ADF fails to reject a unit root (non-stationary) but "
+        "KPSS fails to reject stationarity. This combination is often inconclusive -- "
+        "both tests can have limited power on short or borderline series; treat "
+        "stationarity as genuinely uncertain rather than picking one test's verdict "
+        "over the other."
+    )
+
+
+def check_stationarity(df: pd.DataFrame, kpss_regression: str = "c") -> dict:
+    """Augmented Dickey-Fuller AND KPSS tests for stationarity, each with
+    an effect size, combined into one joint verdict.
+
+    ADF's null hypothesis is that the series has a unit root
+    (non-stationary); a small p-value (< 0.05) rejects that, suggesting
+    stationarity. KPSS's null hypothesis is the OPPOSITE -- that the
+    series IS stationary; a small p-value there rejects stationarity.
+    Running both and reading them together is standard practice, because
+    each test's blind spot is roughly the other's strength. See
+    _combined_stationarity_interpretation for the four-way readout.
+
+    Both tests alone only answer "stationary or not" -- neither says how
+    strongly. This also reports:
+    - a mean-reversion effect size for ADF (`mean_reversion_lambda`,
+      `mean_reversion_half_life_periods` -- see _mean_reversion_effect_size)
+    - an effect size for KPSS (`kpss_effect_size` -- see
+      _kpss_effect_size), which stays informative even when KPSS's own
+      p-value is clipped at a lookup-table boundary.
+
+    Args:
+        kpss_regression: "c" (default, stationary around a constant --
+            the same implicit null ADF is tested against here) or "ct"
+            (stationary around a deterministic trend).
     """
     series = df["value"].dropna()
-    result = adfuller(series, autolag="AIC")
-    adf_stat, p_value = result[0], result[1]
-    effect_size = _mean_reversion_effect_size(series.values)
+
+    adf_result = adfuller(series, autolag="AIC")
+    adf_stat, adf_p_value = adf_result[0], adf_result[1]
+    adf_stationary = bool(adf_p_value < 0.05)
+    reversion = _mean_reversion_effect_size(series.values)
+
+    kpss_result = _kpss_effect_size(series, regression=kpss_regression)
+    kpss_stationary = bool(kpss_result["p_value"] >= 0.05)
+
+    reversion_note = (
+        f"Mean-reversion half-life is ~{reversion['half_life_periods']} periods "
+        "(small = corrects quickly, large = slow even if statistically detectable)."
+        if reversion["half_life_periods"] is not None
+        else "No finite mean-reversion half-life (lambda >= 0 in the ADF regression)."
+    )
+    kpss_effect_note = (
+        f"KPSS statistic is {kpss_result['effect_size']}x its 5% critical value"
+        + (" (comfortably below it)." if kpss_result["effect_size"] < 1 else " (exceeds it).")
+    )
 
     return {
         "adf_statistic": round(float(adf_stat), 4),
-        "p_value": round(float(p_value), 4),
-        "is_likely_stationary": bool(p_value < 0.05),
-        "mean_reversion_lambda": effect_size["lambda"],
-        "mean_reversion_half_life_periods": effect_size["half_life_periods"],
+        "adf_p_value": round(float(adf_p_value), 4),
+        "adf_is_likely_stationary": adf_stationary,
+        "mean_reversion_lambda": reversion["lambda"],
+        "mean_reversion_half_life_periods": reversion["half_life_periods"],
+        "kpss_statistic": kpss_result["statistic"],
+        "kpss_p_value": kpss_result["p_value"],
+        "kpss_lags": kpss_result["lags"],
+        "kpss_critical_value_5pct": kpss_result["critical_value_5pct"],
+        "kpss_effect_size": kpss_result["effect_size"],
+        "kpss_regression": kpss_regression,
+        "kpss_is_likely_stationary": kpss_stationary,
         "interpretation": (
-            "Reject null hypothesis: series is likely stationary."
-            if p_value < 0.05
-            else "Fail to reject null hypothesis: series is likely non-stationary "
-            "(has trend and/or unit root); differencing may be needed."
-        )
-        + (
-            f" Mean-reversion half-life is ~{effect_size['half_life_periods']} periods"
-            " -- a small number here means deviations correct quickly, a large one"
-            " means reversion is slow even if statistically detectable."
-            if effect_size["half_life_periods"] is not None
-            else " No finite mean-reversion half-life (lambda >= 0): the series"
-            " isn't mean-reverting by this measure, regardless of the ADF verdict above."
+            _combined_stationarity_interpretation(adf_stationary, kpss_stationary)
+            + " "
+            + reversion_note
+            + " "
+            + kpss_effect_note
         ),
     }
 

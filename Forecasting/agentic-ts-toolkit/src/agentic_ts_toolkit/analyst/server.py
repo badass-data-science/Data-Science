@@ -65,22 +65,37 @@ def basic_stats(csv_path: str, date_col: str = "date", value_col: str = "value")
 
 
 @mcp.tool()
-def check_stationarity(csv_path: str, date_col: str = "date", value_col: str = "value") -> dict:
-    """Run an Augmented Dickey-Fuller test to check whether a time series
-    is stationary. A p-value below 0.05 suggests the series is stationary;
-    otherwise it likely has a trend or unit root and may need differencing.
-    Also returns a mean-reversion effect size (mean_reversion_lambda,
-    mean_reversion_half_life_periods): a series can be statistically
-    stationary yet revert so slowly the half-life is impractically long
-    for short-horizon forecasting, so check both, not just the p-value.
+def check_stationarity(
+    csv_path: str,
+    kpss_regression: str = "c",
+    date_col: str = "date",
+    value_col: str = "value",
+) -> dict:
+    """Run BOTH an Augmented Dickey-Fuller test and a KPSS test to check
+    whether a time series is stationary, combined into one joint verdict
+    (the two tests have opposite null hypotheses, so running both and
+    reading them together is standard practice -- see `interpretation`
+    for the four-way readout, e.g. what it means if they disagree).
+
+    Also returns two effect sizes, since neither test's p-value alone
+    says how strongly (not just whether) the series behaves that way:
+    - mean_reversion_lambda / mean_reversion_half_life_periods (ADF-based):
+      a series can be statistically stationary yet revert so slowly the
+      half-life is impractically long for short-horizon forecasting.
+    - kpss_effect_size (KPSS statistic / its 5% critical value): stays
+      informative even when KPSS's own p-value is clipped at a
+      lookup-table boundary (a real limitation of that test in practice).
 
     Args:
         csv_path: Path to a CSV with a date column and a value column.
+        kpss_regression: "c" (default, stationary around a constant) or
+            "ct" (stationary around a deterministic trend). Use "ct" if
+            ADF and KPSS disagree in a way that suggests trend-stationarity.
         date_col: Name of the date column in the CSV.
         value_col: Name of the value column in the CSV.
     """
     df = load_series(csv_path, date_col, value_col)
-    return _check_stationarity(df)
+    return _check_stationarity(df, kpss_regression=kpss_regression)
 
 
 @mcp.tool()

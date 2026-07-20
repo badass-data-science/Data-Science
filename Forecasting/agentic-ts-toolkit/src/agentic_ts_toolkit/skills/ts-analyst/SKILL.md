@@ -19,14 +19,32 @@ explore and recommend. Model fitting/backtesting is a separate, later skill.
   data.
 - `ts-analyst__basic_stats` — length, date range, missing values,
   mean/std/min/max.
-- `ts-analyst__check_stationarity` — Augmented Dickey-Fuller test, plus a
-  mean-reversion effect size (`mean_reversion_lambda`,
-  `mean_reversion_half_life_periods`). The p-value alone only tells you
-  whether the series is *statistically* stationary; the half-life tells
-  you whether that reversion is fast enough to matter for the horizon
-  you actually care about. A series can clear p < 0.05 with a
-  half-life of 200 periods -- technically stationary, practically
-  irrelevant for a 30-day forecast.
+- `ts-analyst__check_stationarity` — runs BOTH an Augmented Dickey-Fuller
+  test and a KPSS test and combines them into one joint verdict (`ADF and
+  KPSS agree: ...` or a specific note about what it means if they
+  disagree — read `interpretation`, don't just look at one test's
+  p-value). The two tests have opposite null hypotheses (ADF: unit root;
+  KPSS: stationary), so running both and reading them together is
+  standard practice, not redundant.
+  - `adf_p_value` / `adf_is_likely_stationary` plus a mean-reversion
+    effect size (`mean_reversion_lambda`, `mean_reversion_half_life_periods`):
+    the p-value alone only tells you whether the series is
+    *statistically* stationary; the half-life tells you whether that
+    reversion is fast enough to matter for the horizon you actually
+    care about. A series can clear p < 0.05 with a half-life of 200
+    periods -- technically stationary, practically irrelevant for a
+    30-day forecast.
+  - `kpss_p_value` / `kpss_is_likely_stationary` plus `kpss_effect_size`
+    (the KPSS statistic as a multiple of its own 5% critical value):
+    KPSS's own p-value is clipped at table boundaries (commonly stuck at
+    0.01 or 0.10), so `kpss_effect_size` is the more informative number
+    when you need to know *how far* past the boundary the statistic
+    actually sits, not just that it crossed it.
+  - Optional `kpss_regression`: `"c"` (default) or `"ct"`. If ADF and
+    KPSS disagree with ADF saying stationary and KPSS saying not, that
+    commonly means the series is trend-stationary rather than
+    level-stationary -- worth re-running with `kpss_regression="ct"`
+    before concluding anything.
 - `ts-analyst__seasonal_decomposition_summary` — trend/seasonal strength
   (takes `period`, default 7 for weekly seasonality in daily data).
 - `ts-analyst__acf_pacf_summary` — autocorrelation structure (takes
@@ -58,11 +76,15 @@ Once you have enough evidence, stop calling tools and write a report with:
 - **Findings**: what you found (trend? seasonality? stationarity?
   anomalies?), citing the actual numbers the tools returned. Say "ADF
   p-value of 0.34, so likely non-stationary," not "the data seems
-  non-stationary." For stationarity specifically, cite the half-life
-  alongside the p-value, not just the p-value alone -- "p-value 0.02
-  (stationary), but half-life of 85 periods" is a materially different
-  finding from "p-value 0.02, half-life of 4 periods," even though both
-  clear the same significance threshold.
+  non-stationary." For stationarity specifically:
+  - Report whether ADF and KPSS agreed, not just one of them. If they
+    disagreed, say so explicitly and cite `interpretation`'s explanation
+    of what that combination usually means, rather than silently
+    picking whichever test's verdict you liked better.
+  - Cite the half-life alongside the ADF p-value, not just the p-value
+    alone -- "p-value 0.02 (stationary), but half-life of 85 periods" is
+    a materially different finding from "p-value 0.02, half-life of 4
+    periods," even though both clear the same significance threshold.
 - **Recommended approach**: one forecasting approach (e.g. SARIMA,
   ETS/Holt-Winters, Prophet-style decomposition, gradient-boosted trees with
   lag/calendar features, or a simple neural sequence model), with clear
