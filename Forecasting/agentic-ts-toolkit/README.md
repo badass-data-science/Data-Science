@@ -172,6 +172,29 @@ If `ts-monitor` comes back with `retrain_now`:
 > Use ts-retrain to re-run analyst and forecaster on the updated series
 > and tell me whether the new candidate is actually worth redeploying.
 
+That call stops at the verdict -- `ts-retrain` never redeploys on its own
+in the default mode. If the verdict says `should_redeploy: true` and you
+want to proceed, confirm it explicitly in a follow-up message:
+
+> Go ahead and redeploy the candidate you just recommended.
+
+which is what actually triggers `ts-retrain__execute_redeploy(...,
+confirmed=True)` and updates the manifest.
+
+If you'd rather not be asked each time for a specific series, opt into
+autonomous mode explicitly -- e.g. as a standing instruction in this
+project's own `CLAUDE.md`, or stated up front in the conversation:
+
+> For the `daily_demand.csv` series specifically, you're authorized to
+> redeploy automatically whenever ts-retrain finds a candidate that beats
+> the current deployment -- no need to ask me first. Everything else
+> still needs my confirmation as usual.
+
+With that authorization in place, a later `retrain_now` cycle for that
+series will call `execute_redeploy(confirmed=True)` itself once
+`should_redeploy: true` comes back, and report what it did rather than
+pausing to ask.
+
 ## Publishing this to PyPI
 
 This layout is ready for it as-is:
