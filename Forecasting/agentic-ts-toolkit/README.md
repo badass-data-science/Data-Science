@@ -305,6 +305,33 @@ Before actually publishing, you'll want to:
   reported. This is a standard, accepted tradeoff for this class of
   algorithm; treat `alpha`/`max_changepoints` as tuning knobs, not as
   controlling an exact false-discovery rate.
+- **Every `ts-forecaster` `fit_*` tool's `backtest_metrics` now includes a
+  bootstrap confidence interval** (`mae_ci_lower/upper`, etc., percentile
+  method, deterministic given `seed`, default 1000 resamples) -- a
+  backtest metric computed over a modest `holdout_size` (often ~30
+  points) has real sampling uncertainty of its own; two models scoring
+  MAPE 4.8% and 5.0% might not be a meaningfully different result once
+  you see how wide each one's own interval is. Each result also now
+  includes `holdout_actuals`/`holdout_predicted` arrays, and
+  `residual_diagnostics` (ETS/SARIMA) reports `ljung_box_effect_size`
+  (the Q statistic as a multiple of its own critical value) alongside
+  the p-value.
+- **`ts-forecaster__diebold_mariano_test` gives model comparison actual
+  statistical backing.** Previously "compare candidates honestly" meant
+  eyeballing two error numbers with no way to tell a real difference from
+  holdout noise. This runs a Diebold-Mariano-style test (1995) on two
+  models' paired forecast errors from the SAME holdout (pass
+  `holdout_actuals` and each model's `holdout_predicted`), using a
+  Newey-West/Bartlett-kernel HAC-robust variance estimate (automatic lag
+  selection by default) and a Student's t reference distribution for
+  small-sample conservatism. Returns `is_significant_difference` and
+  `favored_model` (`null` if not significant). Pass `n_lags=0` when
+  comparing two one-step-ahead backtests specifically (e.g. two
+  `fit_gradient_boosted_trees` runs) -- the default automatic lag
+  selection assumes genuinely multi-step, autocorrelated forecast errors.
+  This test tells you whether two models' error numbers differ
+  significantly; it does NOT resolve the one-step-ahead-vs-recursive
+  evaluation mismatch below when comparing across that boundary.
 - **`ts-forecaster`'s gradient-boosted-trees backtest is one-step-ahead**
   (uses true lagged values), while ETS/SARIMA get scored on a genuine
   multi-step forecast -- not directly comparable without accounting for that.
