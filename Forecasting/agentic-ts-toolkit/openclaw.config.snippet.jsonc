@@ -71,3 +71,21 @@
 //         ~/.openclaw/workspace/skills/
 // - Confirm the exact hosted GLM-5.2 id first with:
 //     openclaw models list --provider ollama-cloud
+//
+// ts-retrain / execute_redeploy notes:
+// - ts-retrain__execute_redeploy is the only tool in the whole toolkit
+//   that actually changes a deployment (retrains a model and overwrites
+//   deployment_manifest.json). It refuses to run unless called with
+//   confirmed=True -- there's no config flag in THIS file that changes
+//   that; confirmation is reached either by a human approving in
+//   conversation (default) or by an explicitly authorized autonomous
+//   mode described in the ts-retrain SKILL.md's own instructions. Don't
+//   go looking here for an "autonomous_mode": true switch -- it doesn't
+//   exist at the MCP-config layer by design, since the authorization
+//   judgment is meant to happen per-series in-conversation, not globally
+//   for every server this config wires up.
+// - execute_redeploy needs the `deploy` extra installed (statsmodels +
+//   scikit-learn) regardless of which model_type you retrain with, since
+//   it imports agentic_ts_toolkit.deploy.forecast_tools as a whole
+//   module -- `pip install -e ".[all]"` (per Prerequisites above) already
+//   covers this; a narrower `pip install -e ".[retrain]"` alone will not.
